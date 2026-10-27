@@ -1,0 +1,94 @@
+name: ai-security-policy
+
+on:
+  push:
+  pull_request:
+
+env:
+  OPA_VERSION: v1.4.2
+  CONFTEST_VERSION: 0.62.0
+
+jobs:
+  policy:
+    name: Lint, test, and gate examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: ${{ env.OPA_VERSION }}
+
+      - name: Install Conftest
+        run: |
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
+            | tar xz -C /usr/local/bin conftest
+
+      - name: Lint Rego
+        run: make lint
+
+      - name: Unit tests (>= 90% coverage)
+        run: make test
+
+      - name: Compliant AI manifests pass
+        run: make check
+
+      - name: Compliant Terraform plan passes
+        run: make check-aws
+
+      - name: Non-compliant inputs are rejected
+        run: |
+          if conftest test -p policy examples/noncompliant/; then
+            echo "::error::non-compliant manifest unexpectedly passed"; exit 1
+          fi
+          if conftest test -p policy --namespace aws examples/terraform/noncompliant/plan.json; then
+            echo "::error::non-compliant Terraform plan unexpectedly passed"; exit 1
+          fi
+
+  terraform-plan:
+    # Builds REAL plans from the example .tf files (mock credentials, offline,
+    # never applied) so the policies are proven against actual provider output,
+    # not only the hand-maintained fixtures.
+    name: Gate real Terraform plans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install Conftest
+        run: |
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
+            | tar xz -C /usr/local/bin conftest
+
+      - name: Plan examples
+        run: |
+          for ex in compliant noncompliant; do
+            cp examples/terraform/providers.tf.example examples/terraform/$ex/providers.tf
+            (cd examples/terraform/$ex \
+              && terraform init -input=false \
+              && terraform plan -input=false -refresh=false -out=tfplan \
+              && terraform show -json tfplan > plan.real.json)
+          done
+
+      - name: Compliant real plan passes
+        run: conftest test -p policy --namespace aws examples/terraform/compliant/plan.real.json
+
+      - name: Non-compliant real plan is rejected
+        run: |
+          if conftest test -p policy --namespace aws examples/terraform/noncompliant/plan.real.json; then
+            echo "::error::non-compliant real plan unexpectedly passed"; exit 1
+          fi
+
+      - name: JUnit report
+        if: always()
+        run: conftest test -p policy --namespace aws examples/terraform/*/plan.real.json --output junit > aws-results.xml || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aws-policy-results
+          path: aws-results.xml

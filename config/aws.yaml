@@ -1,0 +1,7 @@
+# Optional settings for the aws namespace. Load with:
+#   conftest test -p policy --namespace aws --data config/ plan.json
+ai27090_config:
+  aws:
+    # true  = a plan with AI resources must also define a CloudTrail trail
+    # false = missing trail is only a warning (an org-wide trail may cover it)
+    require_trail_in_plan: true

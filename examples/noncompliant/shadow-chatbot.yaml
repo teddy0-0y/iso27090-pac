@@ -1,0 +1,65 @@
+# A quickly-shipped chatbot that violates many controls. `make demo` shows the findings.
+apiVersion: ai-security.example/v1
+kind: AISystem
+metadata:
+  name: hr-helper-bot
+  owner: hr-team@example.com      # no inventory_id -> AIS-GOV-01
+  risk_tier: high
+spec:
+  type: generative
+
+  governance:
+    risk_assessment:
+      completed: false            # AIS-GOV-02
+
+  model:
+    source: third_party
+    name: random-hub-model
+    format: bin                   # pickle-based -> AIS-SC-02
+                                  # no checksum or signature -> AIS-SC-01
+
+  data:
+    training:
+      sources:
+        - name: scraped-forum-posts
+          trusted: false          # unsanitized + no provenance -> AIS-DATA-01
+      contains_pii: true          # no pii_controls -> AIS-DATA-05
+      access:
+        least_privilege: false
+    continuous_learning:
+      enabled: true               # no validation -> AIS-DATA-08
+    rag:
+      enabled: true
+      contains_sensitive: true    # employee records, no per-doc authz -> AIS-DATA-10
+
+  inference:
+    exposure: public
+    authentication_required: false
+    returns_confidence_scores: true
+
+  llm:
+    untrusted_content_sources: [web_search]
+    prompt_injection:
+      input_filtering: false
+    output:
+      consumers: [browser, sql]
+
+  agent:
+    enabled: true
+    computer_use: true
+    credentials:
+      identity: inherit_user      # AIS-AGT-01
+      ttl_minutes: 1440           # AIS-AGT-02
+    tools:
+      - name: send_email
+        action: external
+        scopes: ["mail:*"]        # AIS-AGT-03 + AIS-AGT-04
+      - name: run_python
+        action: execute
+        scopes: ["sandbox:run"]
+
+  operations:
+    logging:
+      enabled: false
+    environment:
+      dev_prod_separated: false

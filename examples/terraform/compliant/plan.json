@@ -1,0 +1,540 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.13.4",
+  "resource_changes": [
+    {
+      "address": "aws_kms_key.ai",
+      "mode": "managed",
+      "type": "aws_kms_key",
+      "name": "ai",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "description": "CMK for AI workloads",
+          "enable_key_rotation": true,
+          "deletion_window_in_days": null,
+          "is_enabled": true,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "key_id": true,
+          "policy": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_iam_role.sagemaker_exec",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "sagemaker_exec",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "fraud-model-exec",
+          "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRole\",\"Condition\":{\"StringEquals\":{\"aws:SourceAccount\":\"111122223333\"}},\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"sagemaker.amazonaws.com\"}}],\"Version\":\"2012-10-17\"}",
+          "description": null,
+          "force_detach_policies": false,
+          "max_session_duration": 3600,
+          "path": "/",
+          "permissions_boundary": null,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "inline_policy": true,
+          "managed_policy_arns": true,
+          "unique_id": true,
+          "create_date": true,
+          "name_prefix": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.sagemaker_exec",
+      "mode": "managed",
+      "type": "aws_iam_role_policy",
+      "name": "sagemaker_exec",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "read-model-artifacts",
+          "role": "fraud-model-exec",
+          "policy": "{\"Statement\":[{\"Action\":[\"s3:GetObject\"],\"Effect\":\"Allow\",\"Resource\":[\"arn:aws:s3:::acme-ai-training-data/models/fraud/*\"]}],\"Version\":\"2012-10-17\"}",
+          "tags": null
+        },
+        "after_unknown": {
+          "name_prefix": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_sagemaker_model.fraud",
+      "mode": "managed",
+      "type": "aws_sagemaker_model",
+      "name": "fraud",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "fraud-gbm-v7",
+          "enable_network_isolation": true,
+          "primary_container": [
+            {
+              "image": "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-xgboost:1.7-1",
+              "model_data_url": "s3://acme-ai-training-data/models/fraud/model.tar.gz",
+              "mode": "SingleModel",
+              "environment": null
+            }
+          ],
+          "vpc_config": [
+            {
+              "subnets": [
+                "subnet-0aaa1111bbbb2222c"
+              ],
+              "security_group_ids": [
+                "sg-0123456789abcdef0"
+              ]
+            }
+          ],
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "execution_role_arn": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_sagemaker_endpoint_configuration.fraud",
+      "mode": "managed",
+      "type": "aws_sagemaker_endpoint_configuration",
+      "name": "fraud",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "fraud-gbm-v7",
+          "production_variants": [
+            {
+              "variant_name": "primary",
+              "initial_instance_count": 2,
+              "instance_type": "ml.m5.large",
+              "initial_variant_weight": 1
+            }
+          ],
+          "data_capture_config": [
+            {
+              "enable_capture": true,
+              "initial_sampling_percentage": 100,
+              "destination_s3_uri": "s3://acme-ai-inference-capture/fraud",
+              "capture_options": [
+                {
+                  "capture_mode": "Input"
+                },
+                {
+                  "capture_mode": "Output"
+                }
+              ]
+            }
+          ],
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "kms_key_arn": true,
+          "tags_all": true,
+          "production_variants": [
+            {
+              "model_name": true
+            }
+          ],
+          "data_capture_config": [
+            {
+              "kms_key_id": true
+            }
+          ],
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_sagemaker_endpoint.fraud",
+      "mode": "managed",
+      "type": "aws_sagemaker_endpoint",
+      "name": "fraud",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "fraud-gbm",
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "endpoint_config_name": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_sagemaker_notebook_instance.research",
+      "mode": "managed",
+      "type": "aws_sagemaker_notebook_instance",
+      "name": "research",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "fraud-research",
+          "instance_type": "ml.t3.medium",
+          "direct_internet_access": "Disabled",
+          "root_access": "Disabled",
+          "subnet_id": "subnet-0aaa1111bbbb2222c",
+          "security_groups": [
+            "sg-0123456789abcdef0"
+          ],
+          "volume_size": 5,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "role_arn": true,
+          "kms_key_id": true,
+          "url": true,
+          "network_interface_id": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_bedrock_guardrail.copilot",
+      "mode": "managed",
+      "type": "aws_bedrock_guardrail",
+      "name": "copilot",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "support-copilot",
+          "blocked_input_messaging": "Sorry, I can't help with that request.",
+          "blocked_outputs_messaging": "Sorry, I can't share that.",
+          "content_policy_config": [
+            {
+              "filters_config": [
+                {
+                  "type": "PROMPT_ATTACK",
+                  "input_strength": "HIGH",
+                  "output_strength": "NONE"
+                },
+                {
+                  "type": "HATE",
+                  "input_strength": "HIGH",
+                  "output_strength": "HIGH"
+                }
+              ]
+            }
+          ],
+          "sensitive_information_policy_config": [
+            {
+              "pii_entities_config": [
+                {
+                  "type": "US_SOCIAL_SECURITY_NUMBER",
+                  "action": "BLOCK"
+                },
+                {
+                  "type": "EMAIL",
+                  "action": "ANONYMIZE"
+                }
+              ],
+              "regexes_config": []
+            }
+          ],
+          "topic_policy_config": [],
+          "word_policy_config": [],
+          "contextual_grounding_policy_config": [],
+          "tags": null
+        },
+        "after_unknown": {
+          "guardrail_arn": true,
+          "guardrail_id": true,
+          "kms_key_arn": true,
+          "status": true,
+          "version": true,
+          "created_at": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_iam_role.bedrock_agent",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "bedrock_agent",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "support-copilot-agent",
+          "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRole\",\"Condition\":{\"StringEquals\":{\"aws:SourceAccount\":\"111122223333\"}},\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"bedrock.amazonaws.com\"}}],\"Version\":\"2012-10-17\"}",
+          "description": null,
+          "force_detach_policies": false,
+          "max_session_duration": 3600,
+          "path": "/",
+          "permissions_boundary": null,
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "inline_policy": true,
+          "managed_policy_arns": true,
+          "unique_id": true,
+          "create_date": true,
+          "name_prefix": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_iam_role_policy.bedrock_agent",
+      "mode": "managed",
+      "type": "aws_iam_role_policy",
+      "name": "bedrock_agent",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "invoke-model",
+          "role": "support-copilot-agent",
+          "policy": "{\"Statement\":[{\"Action\":[\"bedrock:InvokeModel\"],\"Effect\":\"Allow\",\"Resource\":[\"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-5-v1:0\"]}],\"Version\":\"2012-10-17\"}",
+          "tags": null
+        },
+        "after_unknown": {
+          "name_prefix": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_bedrockagent_agent.copilot",
+      "mode": "managed",
+      "type": "aws_bedrockagent_agent",
+      "name": "copilot",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "agent_name": "support-copilot",
+          "foundation_model": "anthropic.claude-sonnet-4-5-v1:0",
+          "idle_session_ttl_in_seconds": 600,
+          "prepare_agent": true,
+          "skip_resource_in_use_check": false,
+          "guardrail_configuration": [
+            {
+              "guardrail_version": "DRAFT"
+            }
+          ],
+          "tags": null
+        },
+        "after_unknown": {
+          "agent_arn": true,
+          "agent_id": true,
+          "agent_version": true,
+          "agent_resource_role_arn": true,
+          "customer_encryption_key_arn": true,
+          "guardrail_configuration": [
+            {
+              "guardrail_identifier": true
+            }
+          ],
+          "instruction": true,
+          "prompt_override_configuration": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_bedrock_model_invocation_logging_configuration.this",
+      "mode": "managed",
+      "type": "aws_bedrock_model_invocation_logging_configuration",
+      "name": "this",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "logging_config": [
+            {
+              "text_data_delivery_enabled": true,
+              "embedding_data_delivery_enabled": false,
+              "image_data_delivery_enabled": false,
+              "video_data_delivery_enabled": false,
+              "s3_config": [
+                {
+                  "bucket_name": "acme-ai-invocation-logs",
+                  "key_prefix": "bedrock"
+                }
+              ],
+              "cloudwatch_config": []
+            }
+          ],
+          "tags": null
+        },
+        "after_unknown": {
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    },
+    {
+      "address": "aws_cloudtrail.ai",
+      "mode": "managed",
+      "type": "aws_cloudtrail",
+      "name": "ai",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "before": null,
+        "after": {
+          "name": "ai-workloads",
+          "s3_bucket_name": "acme-cloudtrail-logs",
+          "enable_logging": true,
+          "is_multi_region_trail": true,
+          "enable_log_file_validation": true,
+          "include_global_service_events": true,
+          "is_organization_trail": false,
+          "event_selector": [
+            {
+              "read_write_type": "All",
+              "include_management_events": true,
+              "exclude_management_event_sources": null,
+              "data_resource": [
+                {
+                  "type": "AWS::S3::Object",
+                  "values": [
+                    "arn:aws:s3:::acme-ai-training-data/"
+                  ]
+                }
+              ]
+            }
+          ],
+          "advanced_event_selector": [],
+          "insight_selector": [],
+          "tags": null
+        },
+        "after_unknown": {
+          "arn": true,
+          "home_region": true,
+          "kms_key_id": true,
+          "tags_all": true,
+          "id": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {
+          "tags_all": {}
+        }
+      }
+    }
+  ],
+  "errored": false,
+  "complete": true
+}

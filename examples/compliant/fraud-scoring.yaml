@@ -1,0 +1,80 @@
+# A medium-risk predictive model. Passes all hard requirements; some recommendations
+# remain as warnings, and one is covered by an approved, time-boxed exception.
+apiVersion: ai-security.example/v1
+kind: AISystem
+metadata:
+  name: card-fraud-scoring
+  inventory_id: AI-0107
+  owner: risk-analytics@example.com
+  risk_tier: medium
+  exceptions:
+    - id: AIS-INF-05
+      reason: "Adversarial input detector is being procured; compensating control is per-user throttling and query-pattern monitoring"
+      approved_by: ciso@example.com
+      expires: "2027-03-31"
+spec:
+  type: predictive
+
+  governance:
+    risk_assessment:
+      completed: true
+    threat_model:
+      completed: true
+      last_reviewed: "2026-05-02"
+    red_team:
+      last_exercise: "2026-02-10"
+
+  supply_chain:
+    dependency_scanning: true
+
+  model:
+    source: internal
+    name: gbm-fraud-v7
+    format: onnx
+    provenance_documented: true
+
+  data:
+    training:
+      sources:
+        - name: card-transactions-2024-2026
+          trusted: true
+          provenance_documented: true
+      integrity_verification: true
+      anomaly_detection: true
+      encryption_at_rest: true
+      access:
+        least_privilege: true
+        just_in_time: false       # warning only at medium tier
+      contains_pii: true
+      pii_controls:
+        minimization: true
+        deidentification: true
+      retention_days: 730
+    continuous_learning:
+      enabled: true
+      input_validation: true
+      anomaly_detection: true
+
+  inference:
+    exposure: internal
+    authentication_required: true
+    rate_limit:
+      per_user: true
+      requests_per_minute: 600
+    returns_confidence_scores: true   # internal only -> warning
+    query_timeout_seconds: 2
+    input_checks:
+      ood_detection: true
+      adversarial_detection: false    # waived above
+
+  operations:
+    guardrails: true
+    logging:
+      enabled: true
+      fields: [input, output, timestamp, user_id, model_version]
+    monitoring:
+      continuous_validation: true
+      behavioral_baseline: true
+      mitigation_regression_tests: false
+    environment:
+      dev_prod_separated: true

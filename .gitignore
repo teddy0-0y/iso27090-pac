@@ -1,0 +1,12 @@
+# Never commit the purchased standard — it is licensed for a single user.
+*.pdf
+conftest-results.xml
+coverage.json
+.DS_Store
+aws-results.xml
+# Terraform working files (examples are only ever planned, never applied)
+**/.terraform/
+**/.terraform.lock.hcl
+**/providers.tf
+**/tfplan
+**/plan.real.json

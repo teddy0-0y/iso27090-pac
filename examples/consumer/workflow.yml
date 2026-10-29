@@ -1,0 +1,46 @@
+# Copy to .github/workflows/ai-security.yml in YOUR repository.
+# Checks the AI system manifest on every push and PR, and the Terraform plan
+# for AWS AI infrastructure when Terraform files change.
+name: ai-security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: teddy0-0y/iso27090-pac@v1
+        with:
+          manifest: ai-system.yaml
+
+  terraform:
+    runs-on: ubuntu-latest
+    # Needs read-only AWS credentials for `terraform plan` (e.g. GitHub OIDC).
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::111122223333:role/terraform-plan-readonly
+          aws-region: us-east-1
+      - name: Plan
+        working-directory: infra
+        run: |
+          terraform init -input=false
+          terraform plan -input=false -out=tfplan
+          terraform show -json tfplan > plan.json
+      - uses: teddy0-0y/iso27090-pac@v1
+        with:
+          terraform-plan: infra/plan.json

@@ -1,0 +1,88 @@
+name: ISO/IEC 27090 AI Security Gate
+description: >-
+  Check AI system manifests and AWS Terraform plans (SageMaker, Bedrock,
+  CloudTrail, IAM) against ISO/IEC 27090 controls and fail the build on violations.
+author: Yen-Chu Chen
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  manifest:
+    description: >-
+      AI system manifest(s) to check. Paths or globs, separated by spaces or
+      newlines (e.g. "ai/**/*.yaml"). A pattern that matches nothing fails the step.
+    required: false
+    default: ""
+  terraform-plan:
+    description: >-
+      Terraform plan JSON produced by `terraform show -json tfplan > plan.json`.
+      Paths or globs, separated by spaces or newlines.
+    required: false
+    default: ""
+  config:
+    description: >-
+      Optional data file or directory passed to Conftest, e.g. a file setting
+      ai27090_config.aws.require_trail_in_plan: true
+    required: false
+    default: ""
+  extra-policy:
+    description: Optional directory of your own Rego rules to run alongside the built-in ones.
+    required: false
+    default: ""
+  fail-on-warn:
+    description: Treat warnings as failures ("true" or "false").
+    required: false
+    default: "false"
+  job-summary:
+    description: Write a Markdown report to the workflow run summary ("true" or "false").
+    required: false
+    default: "true"
+
+outputs:
+  passed:
+    description: '"true" if the gate passed.'
+    value: ${{ steps.gate.outputs.passed }}
+  failures:
+    description: Number of failed controls.
+    value: ${{ steps.gate.outputs.failures }}
+  warnings:
+    description: Number of warnings (excluding waived controls).
+    value: ${{ steps.gate.outputs.warnings }}
+  waived:
+    description: Number of controls waived by valid, unexpired exceptions.
+    value: ${{ steps.gate.outputs.waived }}
+
+runs:
+  using: composite
+  steps:
+    - id: gate
+      shell: bash
+      # Inputs are passed through environment variables, never interpolated
+      # into the script, so a crafted file name or input cannot inject shell.
+      env:
+        IN_MANIFEST: ${{ inputs.manifest }}
+        IN_PLAN: ${{ inputs.terraform-plan }}
+        IN_CONFIG: ${{ inputs.config }}
+        IN_EXTRA_POLICY: ${{ inputs.extra-policy }}
+        IN_FAIL_ON_WARN: ${{ inputs.fail-on-warn }}
+        IN_SUMMARY: ${{ inputs.job-summary }}
+        ISO27090_CACHE: ${{ runner.temp }}/iso27090-pac
+      run: |
+        set -euo pipefail
+        set -f  # globs are expanded by the gate itself, not by bash
+
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "::error title=iso27090-gate::Windows runners are not supported; use ubuntu-* or macos-*"
+          exit 2
+        fi
+
+        args=(--format github --github-output "$GITHUB_OUTPUT")
+        [[ -n "$IN_MANIFEST" ]] && args+=("$IN_MANIFEST")  # split on whitespace by the gate
+        for p in $IN_PLAN; do args+=(--plan "$p"); done
+        for d in $IN_CONFIG; do args+=(--data "$d"); done
+        for d in $IN_EXTRA_POLICY; do args+=(--extra-policy "$d"); done
+        [[ "$IN_FAIL_ON_WARN" == "true" ]] && args+=(--fail-on-warn)
+        [[ "$IN_SUMMARY" == "true" ]] && args+=(--summary "$GITHUB_STEP_SUMMARY")
+
+        python3 "$GITHUB_ACTION_PATH/bin/iso27090-gate" "${args[@]}"

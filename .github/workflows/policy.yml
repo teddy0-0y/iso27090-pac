@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   OPA_VERSION: v1.4.2
   CONFTEST_VERSION: 0.62.0

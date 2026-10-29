@@ -1,0 +1,26 @@
+# Hooks published by this repository. Use them from another repo with:
+#
+#   repos:
+#     - repo: https://github.com/teddy0-0y/iso27090-pac
+#       rev: v1.0.0
+#       hooks:
+#         - id: iso27090-manifest
+#
+# Requires Python 3. Conftest is used from PATH if present, otherwise a pinned,
+# checksum-verified release is downloaded once into ~/.cache/iso27090-pac.
+
+- id: iso27090-manifest
+  name: ISO/IEC 27090 AI manifest check
+  description: Block commits of AI system manifests (kind AISystem) that violate ISO/IEC 27090 controls.
+  entry: bin/iso27090-gate --only-ai-manifests
+  language: script
+  types: [yaml]
+  require_serial: true
+
+- id: iso27090-terraform-plan
+  name: ISO/IEC 27090 Terraform plan check
+  description: Check committed `terraform show -json` plan files for AWS AI resources.
+  entry: bin/iso27090-gate --positional-plans
+  language: script
+  files: (^|/)(tf)?plan[^/]*\.json$
+  require_serial: true

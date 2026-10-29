@@ -1,0 +1,10 @@
+# Copy to .pre-commit-config.yaml in YOUR repository, then run:
+#   pip install pre-commit && pre-commit install
+# Every `git commit` that touches an AI manifest (kind: AISystem) or a
+# Terraform plan JSON is checked before the commit is created.
+repos:
+  - repo: https://github.com/teddy0-0y/iso27090-pac
+    rev: v1.0.0
+    hooks:
+      - id: iso27090-manifest
+      - id: iso27090-terraform-plan

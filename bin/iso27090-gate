@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""ISO/IEC 27090 security gate.
+
+Runs this repository's OPA/Rego policies (via Conftest) against AI system
+manifests and Terraform plan JSON, and reports the results for a terminal,
+a pre-commit hook, or GitHub Actions.
+
+    iso27090-gate ai-system.yaml
+    iso27090-gate --plan plan.json
+    iso27090-gate --format github --summary "$GITHUB_STEP_SUMMARY" 'ai/**/*.yaml'
+
+Exit codes: 0 pass, 1 policy failures, 2 usage or tooling error.
+
+Only the Python standard library is used. If `conftest` is not on PATH, a
+pinned release is downloaded once, verified against a SHA-256 checksum that is
+hard-coded below, and cached.
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_POLICY = ROOT / "policy"
+
+CONFTEST_VERSION = "0.62.0"
+# From https://github.com/open-policy-agent/conftest/releases/download/v0.62.0/checksums.txt
+CONFTEST_SHA256 = {
+    ("Linux", "x86_64"): "284231908e4cf66d156e5577c3eee2f67d9f2edf2521fa2309e0df1969f871e5",
+    ("Linux", "arm64"): "2129f630711b8b0fd8d0cee9092c8015c577c3035a2e393d3b340bb1e4e9b59f",
+    ("Darwin", "x86_64"): "2f72025d990a75a5a117644723560a8c2b995489b46886ebddc7412955f1d3af",
+    ("Darwin", "arm64"): "559b11b5d7f3879b19e4b87801a72e014c28556c1c799864073524022e50ea2d",
+}
+
+AI_MANIFEST = re.compile(r"^kind:\s*[\"']?AISystem[\"']?\s*$", re.MULTILINE)
+MESSAGE = re.compile(
+    r"^(?P<waived>WAIVED )?\[(?P<id>[A-Z0-9-]+)\] (?P<body>.*?)(?: \(ISO/IEC 27090 (?P<clause>[^)]*)\))?$"
+)
+
+
+class GateError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Conftest bootstrap
+# ---------------------------------------------------------------------------
+
+
+def platform_key() -> tuple[str, str]:
+    system = platform.system()
+    machine = platform.machine().lower()
+    arch = {"x86_64": "x86_64", "amd64": "x86_64", "arm64": "arm64", "aarch64": "arm64"}.get(machine)
+    if (system, arch) not in CONFTEST_SHA256:
+        raise GateError(f"No pinned Conftest build for {system}/{machine}; install conftest and put it on PATH")
+    return system, arch
+
+
+def find_conftest() -> str:
+    explicit = os.environ.get("ISO27090_CONFTEST")
+    if explicit:
+        return explicit
+    on_path = shutil.which("conftest")
+    if on_path:
+        return on_path
+
+    system, arch = platform_key()
+    cache = Path(os.environ.get("ISO27090_CACHE", Path.home() / ".cache" / "iso27090-pac"))
+    target = cache / f"conftest-{CONFTEST_VERSION}-{system}-{arch}" / "conftest"
+    if target.exists():
+        return str(target)
+
+    name = f"conftest_{CONFTEST_VERSION}_{system}_{arch}.tar.gz"
+    url = f"https://github.com/open-policy-agent/conftest/releases/download/v{CONFTEST_VERSION}/{name}"
+    print(f"iso27090-gate: downloading Conftest {CONFTEST_VERSION} ({system}/{arch})", file=sys.stderr)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as resp:
+            blob = resp.read()
+    except Exception as exc:  # noqa: BLE001 - surface any network failure clearly
+        raise GateError(f"Could not download {url}: {exc}") from exc
+
+    digest = hashlib.sha256(blob).hexdigest()
+    expected = CONFTEST_SHA256[(system, arch)]
+    if digest != expected:
+        raise GateError(f"Checksum mismatch for {name}: got {digest}, expected {expected}. Refusing to run it.")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / name
+        archive.write_bytes(blob)
+        with tarfile.open(archive) as tar:
+            member = tar.getmember("conftest")  # read one known member; never extract arbitrary paths
+            src = tar.extractfile(member)
+            if src is None:
+                raise GateError("conftest binary missing from release archive")
+            partial = target.with_suffix(".partial")
+            partial.write_bytes(src.read())
+    partial.chmod(0o755)
+    partial.replace(target)
+    return str(target)
+
+
+# ---------------------------------------------------------------------------
+# Inputs
+# ---------------------------------------------------------------------------
+
+
+def expand(patterns: list[str]) -> list[str]:
+    """Expand globs. A pattern that matches nothing is an error: fail closed."""
+    files: list[str] = []
+    for raw in patterns:
+        for pattern in raw.split():
+            if any(ch in pattern for ch in "*?["):
+                matches = sorted(p for p in glob.glob(pattern, recursive=True) if os.path.isfile(p))
+                if not matches:
+                    raise GateError(f"Pattern '{pattern}' matched no files")
+                files.extend(matches)
+            elif os.path.isfile(pattern):
+                files.append(pattern)
+            else:
+                raise GateError(f"File not found: {pattern}")
+    return list(dict.fromkeys(files))
+
+
+def is_ai_manifest(path: str) -> bool:
+    try:
+        return bool(AI_MANIFEST.search(Path(path).read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------------
+
+
+def run_conftest(conftest: str, namespace: str, files: list[str], policies: list[str], data: list[str]) -> list[dict]:
+    cmd = [conftest, "test", "--no-color", "--output", "json", "--namespace", namespace]
+    for p in policies:
+        cmd += ["--policy", p]
+    for d in data:
+        cmd += ["--data", d]
+    cmd += files
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise GateError(f"conftest failed (exit {proc.returncode}): {detail}") from exc
+
+
+def parse(results: list[dict], kind: str) -> list[dict]:
+    findings = []
+    for r in results:
+        for level, key in (("fail", "failures"), ("warn", "warnings")):
+            for item in r.get(key) or []:
+                msg = item.get("msg", "")
+                m = MESSAGE.match(msg)
+                waived = bool(m and m.group("waived"))
+                findings.append(
+                    {
+                        "file": r.get("filename", ""),
+                        "kind": kind,
+                        "level": "waived" if waived else level,
+                        "id": m.group("id") if m else "",
+                        "clause": (m.group("clause") or "") if m else "",
+                        "message": m.group("body") if m else msg,
+                    }
+                )
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+ICON = {"fail": "FAIL", "warn": "WARN", "waived": "WAIVED"}
+ORDER = {"fail": 0, "warn": 1, "waived": 2}
+
+
+def sort_key(f: dict) -> tuple:
+    return (f["file"], ORDER[f["level"]], f["id"], f["message"])
+
+
+def gh_escape(value: str, prop: bool = False) -> str:
+    value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    if prop:
+        value = value.replace(":", "%3A").replace(",", "%2C")
+    return value
+
+
+def report_text(findings: list[dict], files: list[str]) -> None:
+    by_file: dict[str, list[dict]] = {f: [] for f in files}
+    for f in findings:
+        by_file.setdefault(f["file"], []).append(f)
+    for path, items in by_file.items():
+        failed = any(i["level"] == "fail" for i in items)
+        print(f"{'✗' if failed else '✓'} {path}")
+        for i in sorted(items, key=sort_key):
+            clause = f"  [{i['clause']}]" if i["clause"] else ""
+            print(f"    {ICON[i['level']]:<6} {i['id']:<16} {i['message']}{clause}")
+
+
+def report_github(findings: list[dict]) -> None:
+    for f in sorted(findings, key=sort_key):
+        if f["level"] == "waived":
+            continue
+        cmd = "error" if f["level"] == "fail" else "warning"
+        title = f"{f['id']} (ISO/IEC 27090 {f['clause']})" if f["clause"] else f["id"] or "iso27090"
+        print(f"::{cmd} file={gh_escape(f['file'], True)},title={gh_escape(title, True)}::{gh_escape(f['message'])}")
+
+
+def md(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def write_summary(path: str, findings: list[dict], files: list[str], counts: dict, passed: bool) -> None:
+    lines = [
+        "## ISO/IEC 27090 security gate",
+        "",
+        f"**{'✅ Passed' if passed else '❌ Failed'}** — {len(files)} file(s) checked: "
+        f"{counts['fail']} failure(s), {counts['warn']} warning(s), {counts['waived']} waived.",
+        "",
+    ]
+    if findings:
+        lines += ["| | Control | Clause | File | Finding |", "|---|---|---|---|---|"]
+        badge = {"fail": "❌", "warn": "⚠️", "waived": "🟦 waived"}
+        for f in sorted(findings, key=lambda x: (ORDER[x["level"]], x["file"], x["id"])):
+            lines.append(f"| {badge[f['level']]} | `{f['id']}` | {md(f['clause'])} | `{md(f['file'])}` | {md(f['message'])} |")
+        lines.append("")
+    lines.append("Control catalog: [docs/controls.md](https://github.com/teddy0-0y/iso27090-pac/blob/main/docs/controls.md)")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="iso27090-gate", description=__doc__.split("\n\n")[0])
+    ap.add_argument("manifests", nargs="*", help="AI system manifests (files or globs)")
+    ap.add_argument("--plan", action="append", default=[], help="Terraform plan JSON from `terraform show -json` (repeatable, globs ok)")
+    ap.add_argument("--data", action="append", default=[], help="Extra data file/dir for Conftest, e.g. config/ (repeatable)")
+    ap.add_argument("--extra-policy", action="append", default=[], help="Additional Rego policy dir with org-specific rules (repeatable)")
+    ap.add_argument("--policy", default=str(DEFAULT_POLICY), help=argparse.SUPPRESS)
+    ap.add_argument("--positional-plans", action="store_true", help="Treat positional files as Terraform plans (used by the pre-commit hook)")
+    ap.add_argument("--only-ai-manifests", action="store_true", help="Silently skip YAML files that are not `kind: AISystem`")
+    ap.add_argument("--fail-on-warn", action="store_true", help="Treat warnings as failures")
+    ap.add_argument("--format", choices=["text", "github"], default="text")
+    ap.add_argument("--summary", help="Append a Markdown report to this file (e.g. $GITHUB_STEP_SUMMARY)")
+    ap.add_argument("--github-output", help="Write failures/warnings/waived counts to this file (e.g. $GITHUB_OUTPUT)")
+    ap.add_argument("--json-out", help="Write all findings as JSON to this file")
+    args = ap.parse_args(argv)
+
+    try:
+        if args.positional_plans:
+            args.plan, args.manifests = [*args.plan, *args.manifests], []
+        manifests = expand(args.manifests)
+        if args.only_ai_manifests:
+            manifests = [m for m in manifests if is_ai_manifest(m)]
+        plans = expand(args.plan)
+        if not manifests and not plans:
+            if args.only_ai_manifests or args.positional_plans:
+                return 0  # pre-commit: nothing relevant was staged
+            raise GateError("Nothing to check: pass a manifest and/or --plan")
+
+        conftest = find_conftest()
+        policies = [args.policy, *args.extra_policy]
+        findings: list[dict] = []
+        if manifests:
+            findings += parse(run_conftest(conftest, "main", manifests, policies, args.data), "manifest")
+        if plans:
+            findings += parse(run_conftest(conftest, "aws", plans, policies, args.data), "terraform-plan")
+    except GateError as exc:
+        print(f"::error title=iso27090-gate::{gh_escape(str(exc))}" if args.format == "github" else f"iso27090-gate: {exc}", file=sys.stderr)
+        return 2
+
+    files = manifests + plans
+    counts = {lvl: sum(1 for f in findings if f["level"] == lvl) for lvl in ("fail", "warn", "waived")}
+    passed = counts["fail"] == 0 and not (args.fail_on_warn and counts["warn"] > 0)
+
+    if args.format == "github":
+        report_github(findings)
+    report_text(findings, files)
+    print(
+        f"\n{'PASSED' if passed else 'FAILED'}: {len(files)} file(s), "
+        f"{counts['fail']} failure(s), {counts['warn']} warning(s), {counts['waived']} waived"
+        + (" (warnings are fatal: --fail-on-warn)" if args.fail_on_warn and counts["warn"] else "")
+    )
+
+    if args.summary:
+        write_summary(args.summary, findings, files, counts, passed)
+    if args.github_output:
+        with open(args.github_output, "a", encoding="utf-8") as fh:
+            fh.write(f"failures={counts['fail']}\nwarnings={counts['warn']}\nwaived={counts['waived']}\npassed={str(passed).lower()}\n")
+    if args.json_out:
+        Path(args.json_out).write_text(json.dumps({"passed": passed, "counts": counts, "findings": findings}, indent=2) + "\n")
+
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

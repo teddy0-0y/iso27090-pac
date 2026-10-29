@@ -1,0 +1,113 @@
+# Tests the repo the way other teams consume it: as a GitHub Action and as a
+# pre-commit hook. Conftest is deliberately NOT pre-installed, so the pinned,
+# checksum-verified download path is exercised on every OS.
+name: self-service-test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    name: Action on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compliant inputs pass
+        id: good
+        uses: ./
+        with:
+          manifest: examples/compliant/*.yaml
+          terraform-plan: examples/terraform/compliant/plan.json
+
+      - name: Non-compliant inputs are blocked
+        id: bad
+        uses: ./
+        continue-on-error: true
+        with:
+          manifest: examples/noncompliant/*.yaml
+          terraform-plan: examples/terraform/noncompliant/plan.json
+          job-summary: "false"
+
+      - name: fail-on-warn turns warnings into failures
+        id: strict
+        uses: ./
+        continue-on-error: true
+        with:
+          manifest: examples/compliant/fraud-scoring.yaml
+          fail-on-warn: "true"
+          job-summary: "false"
+
+      - name: A pattern that matches nothing fails closed
+        id: empty
+        uses: ./
+        continue-on-error: true
+        with:
+          manifest: does-not-exist/*.yaml
+          job-summary: "false"
+
+      - name: Assert outcomes and outputs
+        env:
+          GOOD_PASSED: ${{ steps.good.outputs.passed }}
+          GOOD_WAIVED: ${{ steps.good.outputs.waived }}
+          BAD_OUTCOME: ${{ steps.bad.outcome }}
+          BAD_FAILURES: ${{ steps.bad.outputs.failures }}
+          STRICT_OUTCOME: ${{ steps.strict.outcome }}
+          STRICT_FAILURES: ${{ steps.strict.outputs.failures }}
+          EMPTY_OUTCOME: ${{ steps.empty.outcome }}
+        run: |
+          set -eu
+          check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; status=1; fi; }
+          status=0
+          check "compliant passed"           "$GOOD_PASSED"      "true"
+          check "waiver reported"            "$GOOD_WAIVED"      "1"
+          check "non-compliant blocked"      "$BAD_OUTCOME"      "failure"
+          check "non-compliant failures>0"   "$([ "${BAD_FAILURES:-0}" -gt 0 ] && echo yes)" "yes"
+          check "strict blocked"             "$STRICT_OUTCOME"   "failure"
+          check "strict has 0 hard failures" "$STRICT_FAILURES"  "0"
+          check "empty glob blocked"         "$EMPTY_OUTCOME"    "failure"
+          exit $status
+
+  pre-commit:
+    name: Pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pre-commit==4.3.0
+
+      - name: Build a consumer repo and run the hooks against it
+        run: |
+          set -u
+          hooks="$GITHUB_WORKSPACE"
+          mkdir -p "$RUNNER_TEMP/consumer/ai" && cd "$RUNNER_TEMP/consumer"
+          git init -q && git config user.email ci@example.com && git config user.name ci
+          cp "$hooks/examples/compliant/support-copilot.yaml" ai/copilot.yaml
+          printf 'name: unrelated\non: push\n' > unrelated.yml   # non-AISystem YAML is skipped
+          git add -A
+
+          echo "--- compliant manifest must pass"
+          pre-commit try-repo "$hooks" iso27090-manifest --all-files
+
+          echo "--- non-compliant manifest must fail"
+          cp "$hooks/examples/noncompliant/shadow-chatbot.yaml" ai/bot.yaml && git add -A
+          if pre-commit try-repo "$hooks" iso27090-manifest --all-files; then
+            echo "::error::non-compliant manifest passed the hook"; exit 1
+          fi
+
+          echo "--- non-compliant plan must fail"
+          cp "$hooks/examples/terraform/noncompliant/plan.json" tfplan.json && git add -A
+          if pre-commit try-repo "$hooks" iso27090-terraform-plan --all-files; then
+            echo "::error::non-compliant plan passed the hook"; exit 1
+          fi
+          echo "all hook checks behaved as expected"

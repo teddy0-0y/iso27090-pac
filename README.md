@@ -1,5 +1,8 @@
 # AI System Security Gate — ISO/IEC 27090 as Policy-as-Code
 
+[![policy](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/policy.yml/badge.svg)](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/policy.yml)
+[![self-service](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/action-test.yml/badge.svg)](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/action-test.yml)
+
 Turn the AI-specific security guidance of **ISO/IEC 27090:2026** (*Cybersecurity —
 Artificial intelligence — Addressing security threats and compromises to AI systems*)
 into automated checks that run in CI.
@@ -24,6 +27,70 @@ FAIL - [AIS-AGT-01] Agent identity is 'inherit_user'; it must use a dedicated id
 ...
 52 tests, 0 passed, 6 warnings, 46 failures, 0 exceptions
 ```
+
+## Use it in your repo (self-service)
+
+No cloning, no installing OPA or Conftest, no ticket to the security team.
+
+**GitHub Action** — add to any workflow:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: teddy0-0y/iso27090-pac@v1
+  with:
+    manifest: ai-system.yaml            # paths or globs
+    terraform-plan: infra/plan.json     # optional: terraform show -json output
+```
+
+Violations fail the job, appear as annotations on the PR, and are listed in
+the run summary with the control ID and ISO/IEC 27090 clause.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `manifest` | | AI system manifest paths/globs |
+| `terraform-plan` | | Terraform plan JSON paths/globs |
+| `config` | | Extra Conftest data, e.g. [`config/aws.yaml`](config/aws.yaml) to require a CloudTrail trail |
+| `extra-policy` | | Directory of your own Rego rules, run alongside the built-in ones |
+| `fail-on-warn` | `false` | Treat warnings as failures |
+| `job-summary` | `true` | Write the Markdown report to the run summary |
+
+Outputs: `passed`, `failures`, `warnings`, `waived`. A full workflow that also
+plans Terraform with OIDC credentials is in
+[`examples/consumer/workflow.yml`](examples/consumer/workflow.yml).
+
+**Pre-commit hook** — catch problems before they are committed:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/teddy0-0y/iso27090-pac
+    rev: v1.0.0
+    hooks:
+      - id: iso27090-manifest        # any staged YAML with kind: AISystem
+      - id: iso27090-terraform-plan  # staged plan*.json / tfplan*.json
+```
+
+**Command line** — `bin/iso27090-gate ai-system.yaml --plan plan.json`
+(exit code 0 pass, 1 violations, 2 usage error).
+
+How the self-service pieces are hardened:
+
+- **One engine, three entry points.** The Action, the hook and the CLI all run
+  `bin/iso27090-gate`, so a developer's laptop and CI give the same verdict.
+- **Pinned, verified tooling.** If Conftest is not installed, the gate downloads
+  one pinned release and checks it against a SHA-256 hard-coded in the script;
+  a mismatch aborts instead of running an unverified binary.
+- **Fail closed.** A glob that matches no files fails the check, so a renamed
+  manifest can't silently turn the gate into a no-op.
+- **No script injection.** Action inputs reach the shell only through
+  environment variables, never `${{ }}` interpolation inside `run:`.
+- **Tested as consumers use it.** [`action-test.yml`](.github/workflows/action-test.yml)
+  runs the Action via `uses: ./` on Linux and macOS and the hooks via
+  `pre-commit try-repo` against a throwaway consumer repo.
+
+For production use, pin to a commit SHA instead of `@v1`
+(`uses: teddy0-0y/iso27090-pac@<sha>`), the same supply-chain practice the
+policies enforce for models.
 
 ## Why
 
@@ -121,6 +188,10 @@ examples/
   compliant/             # high-risk RAG+agent copilot; medium-risk fraud model with a waiver
   noncompliant/          # a "shadow AI" chatbot that fails 46 checks
   terraform/             # .tf + plan.json, compliant and non-compliant
+  consumer/              # copy-paste workflow and pre-commit config for other teams
+bin/iso27090-gate        # shared runner for the Action, the hook and the CLI
+action.yml               # reusable GitHub Action
+.pre-commit-hooks.yaml   # published pre-commit hooks
 docs/controls.md         # control catalog and clause mapping
 .github/workflows/       # lint → 136 tests (≥90% coverage) → gate examples → gate real plans
 ```

@@ -15,6 +15,13 @@ metadata:
 spec:
   type: predictive
 
+  # Links a reviewer can open to verify each attested control (AIS-GOV-06)
+  evidence:
+    AIS-GOV-02: https://grc.example.com/assessments/AI-0107
+    AIS-GOV-03: https://wiki.example.com/security/threat-models/fraud-scoring
+    AIS-GOV-04: https://jira.example.com/browse/REDTEAM-27
+    AIS-SC-04: https://wiki.example.com/ml/models/fraud-gbm/provenance
+
   governance:
     risk_assessment:
       completed: true

@@ -1,0 +1,57 @@
+name: manifest-builder
+
+# Publishes the manifest builder (web/index.html) to GitHub Pages.
+# The policy is compiled to WebAssembly on every deploy, so the page always
+# runs the same rules as the Conftest gate on main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "policy/**"
+      - "web/**"
+      - "examples/compliant/**"
+      - "examples/noncompliant/**"
+      - "Makefile"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  OPA_VERSION: v1.4.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: ${{ env.OPA_VERSION }}
+
+      - name: Build site (policy -> WebAssembly)
+        run: make web
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

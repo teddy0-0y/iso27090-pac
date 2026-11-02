@@ -4,7 +4,7 @@ CONFTEST ?= conftest
 TERRAFORM ?= terraform
 TF_EXAMPLES := examples/terraform
 
-.PHONY: all fmt lint test check check-aws demo demo-aws report report-aws plan
+.PHONY: all fmt lint test check check-aws demo demo-aws report report-aws plan web serve
 
 all: lint test check check-aws
 
@@ -52,3 +52,22 @@ plan:
 		&& $(TERRAFORM) plan -input=false -refresh=false -out=tfplan -no-color > /dev/null \
 		&& $(TERRAFORM) show -json tfplan > plan.real.json
 	-$(CONFTEST) test -p $(POLICY) --namespace aws $(TF_EXAMPLES)/$(EX)/plan.real.json
+
+# --- Manifest builder web page -----------------------------------------------
+# Compiles the manifest policy to WebAssembly so the page runs the same rules
+# as Conftest, in the browser. Output goes to _site/ (deployed to GitHub Pages).
+
+SITE := _site
+
+web:
+	rm -rf $(SITE) && mkdir -p $(SITE)/examples
+	$(OPA) build -t wasm -e main/report --ignore tests -o $(SITE)/bundle.tar.gz $(POLICY)
+	mkdir -p $(SITE)/.bundle && tar -xzf $(SITE)/bundle.tar.gz -C $(SITE)/.bundle
+	mv $(SITE)/.bundle/policy.wasm $(SITE)/policy.wasm && chmod 644 $(SITE)/policy.wasm
+	rm -rf $(SITE)/.bundle $(SITE)/bundle.tar.gz
+	cp web/index.html $(SITE)/
+	cp examples/compliant/*.yaml examples/noncompliant/*.yaml $(SITE)/examples/
+
+# Preview locally at http://localhost:8000 (the page must be served, not opened as a file)
+serve: web
+	python3 -m http.server 8000 -d $(SITE)

@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ISO 27090 Manifest Builder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a standards-form workbench. Left: the manifest as a fill-in form, one fieldset per ISO/IEC 27090 clause group.
+   Right: a sticky gate panel that re-runs the Rego policy (compiled to WebAssembly) on every change. */
+:root {
+  --bg: #eef1f0;
+  --panel: #ffffff;
+  --sunk: #f6f8f7;
+  --ink: #17201e;
+  --muted: #5a6764;
+  --line: #d5dcda;
+  --line-strong: #b9c3c0;
+  --accent: #2443b8;
+  --accent-soft: #e6ebfb;
+  --deny: #b42318;
+  --deny-soft: #fdecea;
+  --warn: #9a5b00;
+  --warn-soft: #fdf3e1;
+  --pass: #17784f;
+  --pass-soft: #e5f4ec;
+  --waive: #5b5f97;
+  --waive-soft: #ecedf8;
+  --code-bg: #f3f5f4;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111615; --panel: #182020; --sunk: #141b1a; --ink: #e4ebe9; --muted: #95a39f;
+    --line: #2a3533; --line-strong: #3b4946; --accent: #8ea6ff; --accent-soft: #1f2849;
+    --deny: #ff8a7a; --deny-soft: #3a1b18; --warn: #f2b65a; --warn-soft: #36290f;
+    --pass: #5fd09d; --pass-soft: #12301f; --waive: #b2b6f0; --waive-soft: #25274a; --code-bg: #121918;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111615; --panel: #182020; --sunk: #141b1a; --ink: #e4ebe9; --muted: #95a39f;
+  --line: #2a3533; --line-strong: #3b4946; --accent: #8ea6ff; --accent-soft: #1f2849;
+  --deny: #ff8a7a; --deny-soft: #3a1b18; --warn: #f2b65a; --warn-soft: #36290f;
+  --pass: #5fd09d; --pass-soft: #12301f; --waive: #b2b6f0; --waive-soft: #25274a; --code-bg: #121918;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.5; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 96px; }
+
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--line-strong); }
+.brand .std { font-family: var(--f-mono); font-size: 12px; color: var(--muted); letter-spacing: .02em; }
+.brand h1 { font-family: var(--f-display); font-weight: 600; font-size: 26px; line-height: 1.15; margin: 2px 0 4px; text-wrap: balance; }
+.brand p { margin: 0; color: var(--muted); max-width: 62ch; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.toolbar label.sm { font-size: 12px; color: var(--muted); }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); background: var(--panel); border-radius: var(--r); padding: 6px 12px; cursor: pointer; font-weight: 500; }
+.btn:hover { border-color: var(--accent); }
+a.btn { text-decoration: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.btn.ghost { background: transparent; }
+select.btn { padding-right: 28px; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; margin-top: 20px; align-items: start; }
+@media (max-width: 960px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Form */
+fieldset.sec { border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); padding: 0; margin: 0 0 16px; min-width: 0; }
+.sec > legend { display: contents; }
+.sec-head { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.sec-head h2 { font-family: var(--f-display); font-weight: 600; font-size: 17px; margin: 0; }
+.sec-head .clause { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+.sec-head .left { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.sec-body { padding: 4px 16px 12px; }
+.sub { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 14px 0 2px; }
+
+.row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 220px); gap: 6px 16px; align-items: center; padding: 9px 0; border-top: 1px dashed var(--line); scroll-margin-top: 80px; border-radius: 4px; }
+.sec-body > .row:first-child, .sub + .row { border-top: none; }
+.row.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0%, 30% { background: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
+.row.bad .lbl::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--deny); margin-right: 7px; vertical-align: 1px; }
+.row.soft .lbl::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); margin-right: 7px; vertical-align: 1px; }
+.lbl { font-weight: 500; }
+.hint { font-size: 12.5px; color: var(--muted); }
+.ctl-ids { font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+.ctl { justify-self: end; width: 100%; display: flex; justify-content: flex-end; }
+.row.ev { margin-left: 18px; padding-left: 12px; border-top: none; border-left: 2px solid var(--line-strong); border-radius: 0; }
+.row.ev .lbl { font-size: 13px; }
+.ctl input[type=url], .ctl input[type=text], .ctl input[type=email], .ctl input[type=number], .ctl input[type=date], .ctl select { width: 100%; border: 1px solid var(--line-strong); background: var(--sunk); border-radius: 5px; padding: 6px 8px; min-width: 0; }
+.ctl input.mono { font-family: var(--f-mono); font-size: 12.5px; }
+@media (max-width: 560px) { .row { grid-template-columns: minmax(0, 1fr); } .ctl { justify-content: flex-start; } }
+
+/* Yes/No segmented switch */
+.yn { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 5px; overflow: hidden; }
+.yn button { border: 0; background: var(--sunk); padding: 5px 14px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.yn button + button { border-left: 1px solid var(--line-strong); }
+.yn button[aria-pressed=true].y { background: var(--pass-soft); color: var(--pass); font-weight: 600; }
+.yn button[aria-pressed=true].n { background: var(--panel); color: var(--ink); font-weight: 600; }
+
+.tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+@media (max-width: 560px) { .tags { justify-content: flex-start; } }
+.tag { border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; font-family: var(--f-mono); font-size: 12px; background: var(--sunk); cursor: pointer; color: var(--muted); }
+.tag[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* Repeating lists */
+.list { padding: 8px 0 4px; border-top: 1px dashed var(--line); }
+.list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; scroll-margin-top: 80px; }
+.item { border: 1px solid var(--line); background: var(--sunk); border-radius: 5px; padding: 8px 10px; margin-top: 8px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: end; }
+.item label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+.item input, .item select { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 5px; padding: 5px 7px; width: 100%; min-width: 0; }
+.item .chk { display: flex; gap: 6px; align-items: center; color: var(--ink); font-size: 13px; }
+.item .chk input { width: auto; }
+.item .rm { justify-self: start; }
+.empty { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+
+/* Gate panel */
+aside.gate { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); display: grid; gap: 12px; min-width: 0; }
+@media (max-width: 960px) { aside.gate { position: static; } }
+.verdict { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); overflow: hidden; }
+.verdict .band { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.verdict .band.fail { background: var(--deny-soft); }
+.verdict .band.pass { background: var(--pass-soft); }
+.verdict .state { font-family: var(--f-display); font-size: 22px; font-weight: 600; letter-spacing: .02em; }
+.band.fail .state { color: var(--deny); }
+.band.pass .state { color: var(--pass); }
+.verdict .sys { font-family: var(--f-mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.verdict .band.stale { background: var(--sunk); }
+.verdict .band.stale .state, .verdict .band:not(.fail):not(.pass) .state { color: var(--muted); font-size: 18px; }
+.verdict.is-stale .counts { opacity: .45; }
+.btn.run { padding: 8px 16px; font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: progress; }
+.formcol { min-width: 0; }
+.formend { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 14px 16px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); }
+.idle { padding: 24px 16px; color: var(--muted); text-align: center; }
+.counts { display: grid; grid-template-columns: repeat(3, 1fr); }
+.counts div { padding: 10px 16px; border-right: 1px solid var(--line); }
+.counts div:last-child { border-right: 0; }
+.counts b { display: block; font-family: var(--f-display); font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.counts span { font-size: 12px; color: var(--muted); }
+.c-deny b { color: var(--deny); } .c-warn b { color: var(--warn); } .c-waived b { color: var(--waive); }
+.opts { display: flex; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+.opts label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line-strong); }
+.tabs button { border: 0; background: none; padding: 8px 12px; cursor: pointer; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent); }
+.pane { background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r) var(--r); max-height: calc(100vh - 290px); min-height: 240px; overflow: auto; }
+@media (max-width: 960px) { .pane { max-height: none; } }
+
+.finding { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.finding:last-child { border-bottom: 0; }
+.pill { font-family: var(--f-mono); font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 4px; white-space: nowrap; align-self: start; margin-top: 2px; }
+.pill.deny { background: var(--deny-soft); color: var(--deny); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.waived { background: var(--waive-soft); color: var(--waive); }
+.finding .msg { min-width: 0; }
+.finding .meta { grid-column: 2; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+.finding .fix { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; font-family: var(--f-body); font-size: 12.5px; font-weight: 500; }
+.finding .fix:hover { text-decoration: underline; }
+.allclear { padding: 28px 16px; text-align: center; color: var(--pass); font-weight: 500; }
+
+pre.yaml { margin: 0; padding: 12px 14px; font-family: var(--f-mono); font-size: 12.5px; line-height: 1.55; background: var(--code-bg); white-space: pre; overflow-x: auto; }
+.yaml-actions { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; align-items: center; }
+.cli { font-family: var(--f-mono); font-size: 12px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; overflow-x: auto; white-space: nowrap; }
+.note { font-size: 12px; color: var(--muted); }
+.status { font-size: 12px; color: var(--muted); }
+.status.err { color: var(--deny); }
+
+/* Import dialog */
+.modal { position: fixed; inset: 0; background: color-mix(in srgb, var(--ink) 40%, transparent); display: grid; place-items: center; z-index: 50; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.modal .box { background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--r); width: min(640px, 100%); padding: 16px; display: grid; gap: 10px; }
+.modal h3 { margin: 0; font-family: var(--f-display); font-size: 18px; }
+.modal textarea { width: 100%; min-height: 260px; font-family: var(--f-mono); font-size: 12.5px; border: 1px solid var(--line-strong); background: var(--sunk); border-radius: 5px; padding: 8px; }
+.modal .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+
+/* Mobile verdict bar */
+.mbar { display: none; }
+@media (max-width: 960px) {
+  .mbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; gap: 12px; align-items: center; justify-content: space-between; background: var(--panel); border-top: 1px solid var(--line-strong); padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+  .mbar .st { font-family: var(--f-display); font-weight: 600; font-size: 17px; }
+  .mbar .st.fail { color: var(--deny); } .mbar .st.pass { color: var(--pass); }
+}
+.toast { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(72px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--panel); padding: 8px 14px; border-radius: 5px; font-size: 13px; z-index: 60; }
+@media (prefers-reduced-motion: reduce) { .row.flash { animation: none; background: var(--accent-soft); } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="std">ISO/IEC 27090:2026 · AI system security gate</div>
+      <h1>ISO 27090 Manifest Builder</h1>
+      <p>Describe your AI system with the form, then press Run check. The same Rego policy that runs in CI checks it right in your browser. Nothing is uploaded.</p>
+    </div>
+    <div class="toolbar">
+      <label class="sm" for="tpl">Start from</label>
+      <select id="tpl" class="btn">
+        <option value="">Choose…</option>
+        <option value="shadow">Example: non-compliant chatbot</option>
+        <option value="copilot">Example: compliant support copilot</option>
+        <option value="fraud">Example: fraud scoring model</option>
+        <option value="blank">Blank manifest</option>
+      </select>
+      <button class="btn" id="importBtn" type="button">Import YAML</button>
+      <a class="btn ghost" href="https://github.com/teddy0-0y/iso27090-pac" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="formcol">
+      <form id="form" autocomplete="off"></form>
+      <div class="formend"><span class="note">Done filling in? Test this manifest against all ISO/IEC 27090 controls.</span><button class="btn primary run" type="button" id="runBtn2">Run check</button></div>
+    </div>
+
+    <aside class="gate" id="gate">
+      <div class="verdict">
+        <div class="band" id="band">
+          <div><div class="state" id="state">Loading policy…</div><div class="sys" id="sys"></div></div>
+          <button class="btn primary run" type="button" id="runBtn">Run check</button>
+        </div>
+        <div class="counts">
+          <div class="c-deny"><b id="nDeny">–</b><span>Failures</span></div>
+          <div class="c-warn"><b id="nWarn">–</b><span>Warnings</span></div>
+          <div class="c-waived"><b id="nWaived">–</b><span>Waived</span></div>
+        </div>
+        <div class="opts">
+          <label for="failWarn"><input type="checkbox" id="failWarn"> Treat warnings as failures</label>
+          <span class="status" id="status"></span>
+        </div>
+      </div>
+
+      <div>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" id="tabF" aria-selected="true" aria-controls="paneF">Findings</button>
+          <button type="button" role="tab" id="tabY" aria-selected="false" aria-controls="paneY">manifest.yaml</button>
+          <button type="button" role="tab" id="tabR" aria-selected="false" aria-controls="paneR">Run in CI</button>
+        </div>
+        <div class="pane" id="paneF" role="tabpanel"></div>
+        <div class="pane" id="paneY" role="tabpanel" hidden>
+          <div class="yaml-actions">
+            <button class="btn primary" type="button" id="copyYaml">Copy YAML</button>
+            <button class="btn" type="button" id="dlYaml" hidden>Download ai-system.yaml</button>
+          </div>
+          <pre class="yaml" id="yaml"></pre>
+        </div>
+        <div class="pane" id="paneR" role="tabpanel" hidden>
+          <div style="padding:14px; display:grid; gap:10px;">
+            <div class="note">1. Save the YAML as <code>ai-system.yaml</code> in your repo.</div>
+            <div class="note">2. Check it locally with Conftest:</div>
+            <div class="cli">conftest test -p policy ai-system.yaml</div>
+            <div class="note">3. Or gate every pull request with the GitHub Action:</div>
+            <pre class="cli" style="white-space:pre">- uses: actions/checkout@v4
+- uses: teddy0-0y/iso27090-pac@v1
+  with:
+    manifest: ai-system.yaml</pre>
+            <div class="note">This page runs the same policy compiled to WebAssembly, so results here match Conftest. Dates such as threat-model reviews are checked against today.</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="mbar" id="mbar">
+  <div><span class="st" id="mSt">…</span> <span class="note" id="mCounts"></span></div>
+  <button class="btn primary" type="button" id="mGo">Run check</button>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="impTitle">
+    <h3 id="impTitle">Import a manifest</h3>
+    <div class="note">Paste YAML or choose a file. Fields the builder does not know are dropped.</div>
+    <textarea id="impText" spellcheck="false" placeholder="apiVersion: ai-security.example/v1&#10;kind: AISystem&#10;…"></textarea>
+    <div class="acts">
+      <span class="status err" id="impErr"></span>
+      <input type="file" id="impFile" accept=".yaml,.yml,.json,text/yaml">
+      <button class="btn ghost" type="button" id="impCancel">Cancel</button>
+      <button class="btn primary" type="button" id="impGo">Import</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@open-policy-agent/opa-wasm@1.10.0/dist/opa-wasm-browser.js"></script>
+<script>
+"use strict";
+/* `make web` puts policy.wasm (compiled from policy/) and the example manifests next to this page. */
+const EXAMPLE_FILES = { shadow: "examples/shadow-chatbot.yaml", copilot: "examples/support-copilot.yaml", fraud: "examples/fraud-scoring.yaml" };
+const EXAMPLES = {};
+
+/* ---------- field schema: mirrors what policy/rules/*.rego read ---------- */
+const CONTROL_IDS = [];
+[["GOV",0,6],["SC",1,7],["DATA",1,10],["INF",1,6],["LLM",1,6],["AGT",1,7],["OPS",1,8]].forEach(([p,a,b]) => { for (let i=a;i<=b;i++) CONTROL_IDS.push(`AIS-${p}-${String(i).padStart(2,"0")}`); });
+
+const isGen = s => s["spec.type"] === "generative";
+const isPred = s => s["spec.type"] === "predictive";
+const agentOn = s => s["spec.agent.enabled"] === true;
+
+const SECTIONS = [
+  { id: "governance", title: "Ownership & governance", clause: "Clause 5", domains: ["governance"], fields: [
+    { p: "metadata.name", t: "text", label: "System name", hint: "Short identifier, e.g. hr-helper-bot." },
+    { p: "metadata.inventory_id", t: "text", label: "AI inventory ID", hint: "ID in your organisation's AI system register.", c: ["AIS-GOV-01"] },
+    { p: "metadata.owner", t: "email", label: "Owner", hint: "Team or person accountable for this system.", c: ["AIS-GOV-01"] },
+    { p: "metadata.risk_tier", t: "select", label: "Risk tier", hint: "High turns many recommendations into hard requirements.", opts: ["low","medium","high"], c: ["AIS-GOV-00"] },
+    { p: "spec.type", t: "select", label: "System type", hint: "Generative unlocks the LLM checks; predictive adds input checks.", opts: ["generative","predictive"], c: ["AIS-GOV-00"] },
+    { sub: "Assessments" },
+    { p: "spec.governance.risk_assessment.completed", ev: "AIS-GOV-02", t: "bool", label: "Risk assessment completed", c: ["AIS-GOV-02"] },
+    { p: "spec.governance.threat_model.completed", ev: "AIS-GOV-03", t: "bool", label: "Threat model exists", c: ["AIS-GOV-03"] },
+    { p: "spec.governance.threat_model.last_reviewed", t: "date", label: "Threat model last reviewed", hint: "Must be within the last 365 days.", c: ["AIS-GOV-03"], when: s => s["spec.governance.threat_model.completed"] === true },
+    { p: "spec.governance.red_team.last_exercise", ev: "AIS-GOV-04", t: "date", label: "Last red-team exercise", hint: "Must be within the last 365 days.", c: ["AIS-GOV-04"] },
+    { p: "metadata.exceptions", t: "list", label: "Approved exceptions", hint: "Risk acceptance for a specific control. Needs a reason, approver and future expiry.", c: ["AIS-GOV-05"], add: "Add exception",
+      item: [ { k: "id", t: "select", label: "Control", opts: CONTROL_IDS }, { k: "reason", t: "text", label: "Reason" }, { k: "approved_by", t: "text", label: "Approved by" }, { k: "expires", t: "date", label: "Expires" } ] },
+  ]},
+  { id: "supply_chain", title: "Model & supply chain", clause: "5.5 · 6.11.4 · B.4", domains: ["supply_chain"], fields: [
+    { p: "spec.model.source", t: "select", label: "Model source", opts: ["third_party","in_house"], hint: "Third-party models must be pinned and verified.", c: ["AIS-SC-01","AIS-SC-03"] },
+    { p: "spec.model.name", t: "text", label: "Model name", hint: "e.g. meta-llama/Llama-3.1-8B-Instruct" },
+    { p: "spec.model.format", t: "select", label: "Weights format", hint: "Pickle-based formats can run code when loaded.", c: ["AIS-SC-02"],
+      groups: [["Safe", ["safetensors","onnx","gguf","savedmodel","tflite","coreml"]], ["Pickle-based (unsafe)", ["bin","pt","pth","pkl","pickle","joblib","ckpt"]]] },
+    { p: "spec.model.checksum", t: "text", mono: true, label: "Pinned checksum", hint: "Format sha256:<hex>", c: ["AIS-SC-01"] },
+    { p: "spec.model.signature_verified", t: "bool", label: "Signature verified", c: ["AIS-SC-01"] },
+    { p: "spec.model.from_verified_repository", t: "bool", label: "From a verified model repository", c: ["AIS-SC-03"] },
+    { p: "spec.model.provenance_documented", ev: "AIS-SC-04", t: "bool", label: "Provenance documented", c: ["AIS-SC-04"] },
+    { p: "spec.model.scanned_for_malicious_code", ev: "AIS-SC-05", t: "bool", label: "Weights scanned for malicious code", c: ["AIS-SC-05"] },
+    { p: "spec.model.behavioral_validation", ev: "AIS-SC-07", t: "bool", label: "Behavioural validation done", hint: "Tested for hidden trigger behaviour.", c: ["AIS-SC-07"] },
+    { p: "spec.supply_chain.dependency_scanning", t: "bool", label: "AI dependency scanning", c: ["AIS-SC-06"] },
+  ]},
+  { id: "data", title: "Data", clause: "6.2 · 6.4 · 7.6 · B.6", domains: ["data_security"], fields: [
+    { sub: "Training data" },
+    { p: "spec.data.training.sources", t: "list", label: "Training data sources", hint: "Untrusted sources must be sanitized; every source needs provenance.", c: ["AIS-DATA-01"], add: "Add source",
+      item: [ { k: "name", t: "text", label: "Name" }, { k: "trusted", t: "check", label: "Trusted" }, { k: "sanitized", t: "check", label: "Sanitized" }, { k: "provenance_documented", t: "check", label: "Provenance documented" } ] },
+    { p: "spec.data.training.integrity_verification", t: "bool", label: "Dataset integrity verified (hashes)", c: ["AIS-DATA-02"] },
+    { p: "spec.data.training.access.least_privilege", t: "bool", label: "Least-privilege access", c: ["AIS-DATA-03"] },
+    { p: "spec.data.training.access.just_in_time", t: "bool", label: "Just-in-time access", c: ["AIS-DATA-03"] },
+    { p: "spec.data.training.encryption_at_rest", t: "bool", label: "Encrypted at rest", c: ["AIS-DATA-04"] },
+    { p: "spec.data.training.anomaly_detection", t: "bool", label: "Anomaly / drift detection", c: ["AIS-DATA-07"] },
+    { p: "spec.data.training.retention_days", t: "number", label: "Retention period (days)", c: ["AIS-DATA-06"] },
+    { p: "spec.data.training.contains_pii", t: "bool", label: "Contains personal data (PII)", c: ["AIS-DATA-05"] },
+    { p: "spec.data.training.pii_controls.minimization", t: "bool", label: "PII: data minimization", c: ["AIS-DATA-05"], when: s => s["spec.data.training.contains_pii"] === true },
+    { p: "spec.data.training.pii_controls.deidentification", t: "bool", label: "PII: de-identification", hint: "De-identification or differential privacy is required.", c: ["AIS-DATA-05"], when: s => s["spec.data.training.contains_pii"] === true },
+    { p: "spec.data.training.pii_controls.differential_privacy", t: "bool", label: "PII: differential privacy", c: ["AIS-DATA-05"], when: s => s["spec.data.training.contains_pii"] === true },
+    { sub: "Continuous learning" },
+    { p: "spec.data.continuous_learning.enabled", t: "bool", label: "Learns from production data", c: ["AIS-DATA-08"] },
+    { p: "spec.data.continuous_learning.input_validation", t: "bool", label: "New data is validated", c: ["AIS-DATA-08"], when: s => s["spec.data.continuous_learning.enabled"] === true },
+    { p: "spec.data.continuous_learning.anomaly_detection", t: "bool", label: "New data is anomaly-checked", c: ["AIS-DATA-08"], when: s => s["spec.data.continuous_learning.enabled"] === true },
+    { sub: "Retrieval (RAG)" },
+    { p: "spec.data.rag.enabled", t: "bool", label: "Uses retrieval (RAG)", c: ["AIS-DATA-09"] },
+    { p: "spec.data.rag.sources_vetted", t: "bool", label: "RAG sources vetted", c: ["AIS-DATA-09"], when: s => s["spec.data.rag.enabled"] === true },
+    { p: "spec.data.rag.contains_sensitive", t: "bool", label: "RAG holds sensitive documents", c: ["AIS-DATA-10"], when: s => s["spec.data.rag.enabled"] === true },
+    { p: "spec.data.rag.per_document_authz", t: "bool", label: "Per-document authorization", c: ["AIS-DATA-10"], when: s => s["spec.data.rag.enabled"] === true && s["spec.data.rag.contains_sensitive"] === true },
+    { p: "spec.data.rag.encryption_at_rest", t: "bool", label: "RAG store encrypted at rest", c: ["AIS-DATA-10"], when: s => s["spec.data.rag.enabled"] === true && s["spec.data.rag.contains_sensitive"] === true },
+  ]},
+  { id: "inference", title: "Inference endpoint", clause: "5.3 · 6.3–6.6 · 7.7", domains: ["inference"], fields: [
+    { p: "spec.inference.exposure", t: "select", label: "Exposure", opts: ["public","internal"], hint: "Public endpoints get stricter abuse checks.", c: ["AIS-INF-02","AIS-INF-06"] },
+    { p: "spec.inference.authentication_required", t: "bool", label: "Authentication required", c: ["AIS-INF-01"] },
+    { p: "spec.inference.rate_limit.per_user", t: "bool", label: "Per-user rate limit", c: ["AIS-INF-02"] },
+    { p: "spec.inference.rate_limit.requests_per_minute", t: "number", label: "Requests per minute", c: ["AIS-INF-02"], when: s => s["spec.inference.rate_limit.per_user"] === true },
+    { p: "spec.inference.returns_confidence_scores", t: "bool", label: "Returns confidence scores", hint: "Helps attackers invert the model.", c: ["AIS-INF-03"] },
+    { p: "spec.inference.query_timeout_seconds", t: "number", label: "Query timeout (seconds)", c: ["AIS-INF-04"] },
+    { p: "spec.inference.query_pattern_monitoring", t: "bool", label: "Per-caller query pattern monitoring", c: ["AIS-INF-06"] },
+    { p: "spec.inference.input_checks.ood_detection", t: "bool", label: "Out-of-distribution input detection", c: ["AIS-INF-05"], when: isPred },
+    { p: "spec.inference.input_checks.adversarial_detection", t: "bool", label: "Adversarial input detection", c: ["AIS-INF-05"], when: isPred },
+  ]},
+  { id: "llm", title: "Generative AI / LLM", clause: "6.8–6.10", domains: ["llm"], when: isGen, fields: [
+    { p: "spec.llm.untrusted_content_sources", t: "tags", label: "Untrusted content in the prompt", hint: "Anything a third party can write into the context.", opts: ["customer_email","web_pages","uploaded_files","chat_history","tickets"], c: ["AIS-LLM-02"] },
+    { p: "spec.llm.prompt_injection.input_filtering", t: "bool", label: "Input filtering / injection classifier", c: ["AIS-LLM-01"] },
+    { p: "spec.llm.prompt_injection.input_segregation", t: "bool", label: "Untrusted content segregated from instructions", c: ["AIS-LLM-02"] },
+    { p: "spec.llm.prompt_injection.hardened_system_prompt", t: "bool", label: "Hardened system prompt", c: ["AIS-LLM-05"] },
+    { p: "spec.llm.prompt_injection.adversarial_testing", ev: "AIS-LLM-06", t: "bool", label: "Adversarial prompt tests before release", c: ["AIS-LLM-06"] },
+    { p: "spec.llm.output.consumers", t: "tags", label: "Where output goes", hint: "Browser, SQL and shell interpret output and need encoding.", opts: ["browser","html","sql","shell","code_execution","email_html","plain_text","api"], c: ["AIS-LLM-04"] },
+    { p: "spec.llm.output.sensitive_data_filter", t: "bool", label: "Output filter for sensitive data", c: ["AIS-LLM-03"] },
+    { p: "spec.llm.output.validation_and_encoding", t: "bool", label: "Output validated and encoded", c: ["AIS-LLM-04"] },
+  ]},
+  { id: "agents", title: "Agents & tools", clause: "5.3 · 6.11.3", domains: ["agents"], fields: [
+    { p: "spec.agent.enabled", t: "bool", label: "System acts as an agent (calls tools)" },
+    { p: "spec.agent.credentials.identity", t: "select", label: "Agent identity", opts: ["dedicated","inherit_user","shared_service_account"], c: ["AIS-AGT-01"], when: agentOn },
+    { p: "spec.agent.credentials.ttl_minutes", t: "number", label: "Credential lifetime (minutes)", hint: "60 minutes or less.", c: ["AIS-AGT-02"], when: agentOn },
+    { p: "spec.agent.execution_environment", t: "select", label: "Execution environment", opts: ["sandboxed","host","container_shared"], c: ["AIS-AGT-05"], when: agentOn },
+    { p: "spec.agent.computer_use", t: "bool", label: "Computer use (drives a desktop/browser)", c: ["AIS-AGT-05"], when: agentOn },
+    { p: "spec.agent.action_audit_log", t: "bool", label: "Audit log of agent actions", c: ["AIS-AGT-06"], when: agentOn },
+    { p: "spec.agent.kill_switch", t: "bool", label: "Kill switch on anomaly", c: ["AIS-AGT-07"], when: agentOn },
+    { p: "spec.agent.tools", t: "list", label: "Tools", hint: "Scopes are comma-separated and may not contain *. External, delete, execute and payment need human approval.", c: ["AIS-AGT-03","AIS-AGT-04"], add: "Add tool", when: agentOn,
+      item: [ { k: "name", t: "text", label: "Name" }, { k: "action", t: "select", label: "Action", opts: ["read","write","external","delete","execute","payment"] }, { k: "scopes", t: "csv", label: "Scopes" }, { k: "requires_human_approval", t: "check", label: "Human approval" } ] },
+  ]},
+  { id: "operations", title: "Operations", clause: "6.11.3 · 7.2–7.6", domains: ["operations"], fields: [
+    { p: "spec.operations.logging.enabled", t: "bool", label: "Usage logging", c: ["AIS-OPS-01"] },
+    { p: "spec.operations.logging.fields", t: "tags", label: "Logged fields", opts: ["input","output","timestamp","user_id","model_version"], c: ["AIS-OPS-02"], when: s => s["spec.operations.logging.enabled"] === true },
+    { p: "spec.operations.monitoring.continuous_validation", t: "bool", label: "Continuous validation on a test set", c: ["AIS-OPS-03"] },
+    { p: "spec.operations.monitoring.behavioral_baseline", t: "bool", label: "Behavioural baseline monitoring", c: ["AIS-OPS-04"] },
+    { p: "spec.operations.environment.dev_prod_separated", t: "bool", label: "Dev and prod separated", c: ["AIS-OPS-05"] },
+    { p: "spec.operations.monitoring.mitigation_regression_tests", t: "bool", label: "Mitigations re-tested after retraining", c: ["AIS-OPS-06"] },
+    { p: "spec.operations.end_of_life_disposal", t: "bool", label: "End-of-life disposal procedure", c: ["AIS-OPS-07"] },
+    { p: "spec.operations.human_oversight", t: "bool", label: "Human oversight", hint: "High-risk systems need oversight or guardrails.", c: ["AIS-OPS-08"] },
+    { p: "spec.operations.guardrails", t: "bool", label: "Guardrails", c: ["AIS-OPS-08"] },
+  ]},
+];
+/* Each attested control gets an "Evidence link" row right after it, shown once the claim is made (AIS-GOV-06). */
+const EV_SECTION = {};
+for (const sec of SECTIONS) {
+  sec.fields = sec.fields.flatMap(f => {
+    if (!f.ev) return [f];
+    const claim = f.t === "bool" ? s => s[f.p] === true : s => !!s[f.p];
+    EV_SECTION[f.ev] = sec;
+    return [f, { p: `spec.evidence.${f.ev}`, t: "url", evFor: f.ev, label: "Evidence link",
+      hint: "Link to the report, ticket or document a reviewer can open to verify this.",
+      c: ["AIS-GOV-06"], when: s => (!f.when || f.when(s)) && claim(s) }];
+  });
+}
+const EV_PARENTS = new Set(SECTIONS.flatMap(s => s.fields.filter(f => f.ev).map(f => f.p)));
+const ALL_FIELDS = SECTIONS.flatMap(s => s.fields.filter(f => f.p).map(f => ({ ...f, sec: s })));
+
+/* ---------- state ---------- */
+let S = {};   // flat: path -> value
+const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? undefined : a[k]), o);
+function setPath(o, p, v) { const ks = p.split("."); let a = o; ks.slice(0, -1).forEach(k => { if (typeof a[k] !== "object" || a[k] === null) a[k] = {}; a = a[k]; }); a[ks.at(-1)] = v; }
+const visible = (f, sec) => (!sec.when || sec.when(S)) && (!f.when || f.when(S));
+
+function toManifest() {
+  const m = { apiVersion: "ai-security.example/v1", kind: "AISystem", metadata: {}, spec: {} };
+  for (const f of ALL_FIELDS) {
+    if (!visible(f, f.sec)) continue;
+    let v = S[f.p];
+    if (f.t === "bool") v = v === true;
+    else if (f.t === "list") { v = (v || []).map(cleanItem.bind(null, f)); if (!v.length) continue; }
+    else if (f.t === "tags") { v = v || []; if (!v.length) continue; }
+    else if (v === undefined || v === null || v === "") continue;
+    setPath(m, f.p, v);
+  }
+  return m;
+}
+function cleanItem(f, it) {
+  const o = {};
+  for (const c of f.item) {
+    let v = it[c.k];
+    if (c.t === "check") { if (v === true) o[c.k] = true; else if (c.k === "trusted") o[c.k] = false; continue; }
+    if (c.t === "csv") { o[c.k] = Array.isArray(v) ? v : String(v || "").split(",").map(x => x.trim()).filter(Boolean); continue; }
+    if (v !== undefined && v !== "") o[c.k] = v;
+  }
+  return o;
+}
+function fromManifest(m) {
+  S = {};
+  let dropped = 0;
+  for (const f of ALL_FIELDS) {
+    let v = getPath(m, f.p);
+    if (v === undefined) continue;
+    if (v instanceof Date) v = v.toISOString().slice(0, 10);
+    if (f.t === "list") v = (Array.isArray(v) ? v : []).map(it => ({ ...it, expires: it.expires instanceof Date ? it.expires.toISOString().slice(0,10) : it.expires }));
+    S[f.p] = v;
+  }
+  return dropped;
+}
+
+/* ---------- form rendering ---------- */
+const form = document.getElementById("form");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fid = p => "f_" + p.replace(/\./g, "_");
+
+function renderForm() {
+  const html = [];
+  for (const sec of SECTIONS) {
+    if (sec.when && !sec.when(S)) continue;
+    html.push(`<fieldset class="sec" id="sec_${sec.id}"><legend><div class="sec-head"><div class="left"><h2>${sec.title}</h2><span class="clause">ISO/IEC 27090 ${sec.clause}</span></div><span class="secbadge" data-sec="${sec.id}"></span></div></legend><div class="sec-body">`);
+    for (const f of sec.fields) {
+      if (f.sub) { html.push(`<div class="sub">${f.sub}</div>`); continue; }
+      if (!visible(f, sec)) continue;
+      html.push(renderField(f));
+    }
+    html.push(`</div></fieldset>`);
+  }
+  form.innerHTML = html.join("");
+}
+function ids(f) { return f.c ? `<span class="ctl-ids">${f.c.join(" · ")}</span>` : ""; }
+function labelBlock(f, forId) {
+  return `<div><div class="lbl"><label for="${forId}">${f.label}</label></div>${f.hint ? `<div class="hint">${f.hint}</div>` : ""}${ids(f)}</div>`;
+}
+function renderField(f) {
+  const id = fid(f.p), v = S[f.p];
+  const dc = f.c ? ` data-c="${f.c.join(" ")}"` : "";
+  if (f.t === "list") return renderList(f);
+  if (f.t === "url") {
+    return `<div class="row ev" data-row="${f.p}" data-c="EV:${f.evFor}"><div><div class="lbl"><label for="${id}">${f.label}</label></div><div class="hint">${f.hint}</div><span class="ctl-ids">AIS-GOV-06 · evidence for ${f.evFor}</span></div><div class="ctl"><input id="${id}" type="url" class="mono" data-p="${f.p}" value="${esc(v)}" placeholder="https://…" inputmode="url"></div></div>`;
+  }
+  let ctl = "";
+  if (f.t === "bool") {
+    ctl = `<div class="yn" role="group" id="${id}"><button type="button" class="y" data-p="${f.p}" data-v="1" aria-pressed="${v === true}">Yes</button><button type="button" class="n" data-p="${f.p}" data-v="0" aria-pressed="${v !== true}">No</button></div>`;
+  } else if (f.t === "select") {
+    const opts = f.groups ? f.groups.map(([g, os]) => `<optgroup label="${g}">${os.map(o => `<option${o === v ? " selected" : ""}>${o}</option>`).join("")}</optgroup>`).join("")
+                          : f.opts.map(o => `<option${o === v ? " selected" : ""}>${o}</option>`).join("");
+    ctl = `<select id="${id}" data-p="${f.p}"><option value=""${v ? "" : " selected"}>Not set</option>${opts}</select>`;
+  } else if (f.t === "tags") {
+    const cur = new Set(v || []); const all = [...new Set([...f.opts, ...cur])];
+    ctl = `<div class="tags" id="${id}" role="group">${all.map(o => `<button type="button" class="tag" data-p="${f.p}" data-tag="${esc(o)}" aria-pressed="${cur.has(o)}">${esc(o)}</button>`).join("")}</div>`;
+  } else {
+    const type = f.t === "email" ? "email" : f.t === "number" ? "number" : f.t === "date" ? "date" : "text";
+    ctl = `<input id="${id}" type="${type}" data-p="${f.p}" value="${esc(v)}"${f.mono ? ' class="mono"' : ""}${f.t === "number" ? ' min="0" inputmode="numeric"' : ""}>`;
+  }
+  return `<div class="row" data-row="${f.p}"${dc}>${labelBlock(f, id)}<div class="ctl">${ctl}</div></div>`;
+}
+function renderList(f) {
+  const items = S[f.p] || [];
+  const dc = f.c ? ` data-c="${f.c.join(" ")}"` : "";
+  const body = items.length ? items.map((it, i) => `<div class="item">${f.item.map(c => renderItemCtl(f, c, it, i)).join("")}<button type="button" class="btn ghost rm" data-rm="${f.p}" data-i="${i}">Remove</button></div>`).join("")
+                            : `<div class="empty">None listed.</div>`;
+  return `<div class="list" data-row="${f.p}"${dc}><div class="list-head"><div><div class="lbl">${f.label}</div>${f.hint ? `<div class="hint">${f.hint}</div>` : ""}${ids(f)}</div><button type="button" class="btn" data-add="${f.p}">${f.add}</button></div>${body}</div>`;
+}
+function renderItemCtl(f, c, it, i) {
+  const id = `${fid(f.p)}_${i}_${c.k}`, v = it[c.k], attrs = `id="${id}" data-lp="${f.p}" data-i="${i}" data-k="${c.k}"`;
+  if (c.t === "check") return `<label class="chk" for="${id}"><input type="checkbox" ${attrs}${v === true ? " checked" : ""}> ${c.label}</label>`;
+  if (c.t === "select") return `<label for="${id}">${c.label}<select ${attrs}><option value="">Not set</option>${c.opts.map(o => `<option${o === v ? " selected" : ""}>${o}</option>`).join("")}</select></label>`;
+  const val = c.t === "csv" ? (Array.isArray(v) ? v.join(", ") : v) : v;
+  return `<label for="${id}">${c.label}<input type="${c.t === "date" ? "date" : "text"}" ${attrs} value="${esc(val)}"${c.t === "csv" ? ' class="mono" placeholder="orders:read"' : ""}></label>`;
+}
+
+function evShownChanged(p) {
+  const f = ALL_FIELDS.find(x => x.p === p); const ev = ALL_FIELDS.find(x => x.evFor === f.ev);
+  const shown = !!form.querySelector(`[data-row="${ev.p}"]`);
+  return shown !== visible(ev, ev.sec);
+}
+/* re-render only when visibility may change; otherwise just re-evaluate */
+const STRUCTURAL = new Set(["spec.type","spec.agent.enabled","spec.governance.threat_model.completed","spec.data.training.contains_pii","spec.data.continuous_learning.enabled","spec.data.rag.enabled","spec.data.rag.contains_sensitive","spec.inference.rate_limit.per_user","spec.operations.logging.enabled"]);
+function changed(p, rerender) {
+  if (rerender || STRUCTURAL.has(p) || (EV_PARENTS.has(p) && evShownChanged(p))) { const y = scrollY; renderForm(); scrollTo(0, y); }
+  schedule();
+}
+form.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.v !== undefined) { S[b.dataset.p] = b.dataset.v === "1"; b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); changed(b.dataset.p); }
+  else if (b.dataset.tag !== undefined) { const p = b.dataset.p, t = b.dataset.tag, cur = new Set(S[p] || []); cur.has(t) ? cur.delete(t) : cur.add(t); S[p] = [...cur]; b.setAttribute("aria-pressed", cur.has(t)); changed(p); }
+  else if (b.dataset.add) { const p = b.dataset.add; S[p] = [...(S[p] || []), {}]; changed(p, true); }
+  else if (b.dataset.rm) { const p = b.dataset.rm; S[p] = (S[p] || []).filter((_, i) => i !== +b.dataset.i); changed(p, true); }
+});
+form.addEventListener("input", e => {
+  const el = e.target;
+  if (el.dataset.p) {
+    const f = ALL_FIELDS.find(x => x.p === el.dataset.p);
+    let v = el.value;
+    if (f.t === "number") v = v === "" ? undefined : Number(v);
+    S[el.dataset.p] = v; changed(el.dataset.p);
+  } else if (el.dataset.lp) {
+    const list = S[el.dataset.lp] || [], it = list[+el.dataset.i]; if (!it) return;
+    it[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; schedule();
+  }
+});
+form.addEventListener("submit", e => e.preventDefault());
+
+/* ---------- policy engine ---------- */
+const NS = 1e6;
+function parseDateOnly(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s)); if (!m) return undefined; const t = Date.UTC(+m[1], +m[2] - 1, +m[3]); const d = new Date(t); if (d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) return undefined; return t * NS; }
+function parseRfc3339(s) { if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(String(s))) return undefined; const t = Date.parse(s); return Number.isNaN(t) ? undefined : t * NS; }
+const timeBuiltins = {
+  "time.now_ns": () => Date.now() * NS,
+  "time.parse_rfc3339_ns": s => parseRfc3339(s),
+  "time.parse_ns": (layout, s) => (layout === "2006-01-02" ? parseDateOnly(s) : undefined),
+};
+let policy = null, lastReport = null, timer = 0;
+const $ = id => document.getElementById(id);
+
+async function loadEngine() {
+  const res = await fetch("policy.wasm");
+  if (!res.ok) throw new Error("policy.wasm not found. Build the site with `make web`.");
+  policy = await opa.loadPolicy(await res.arrayBuffer(), undefined, timeBuiltins);
+  policy.setData({});
+}
+/* Edits only refresh the YAML preview; the policy runs when the user presses Run check. */
+function schedule() { clearTimeout(timer); timer = setTimeout(renderYaml, 150); saveDraft(); markStale(); }
+function renderYaml() { $("yaml").textContent = jsyaml.dump(toManifest(), { lineWidth: 100, noRefs: true }); }
+function markStale() {
+  if (!lastReport) return;
+  $("band").className = "band stale";
+  $("state").textContent = "Not checked";
+  $("sys").textContent = "Form changed since the last run";
+  $("mSt").textContent = "Not checked"; $("mSt").className = "st";
+  $("mCounts").textContent = "";
+  document.querySelector(".verdict").classList.add("is-stale");
+}
+function showNotRun() {
+  lastReport = null;
+  $("band").className = "band";
+  $("state").textContent = "Not checked yet";
+  $("sys").textContent = "";
+  ["nDeny", "nWarn", "nWaived"].forEach(id => $(id).textContent = "–");
+  $("mSt").textContent = "Not checked"; $("mSt").className = "st"; $("mCounts").textContent = "";
+  $("paneF").innerHTML = `<div class="idle">Fill in the form, then press <b>Run check</b> to test this manifest against all ISO/IEC 27090 controls.</div>`;
+  form.querySelectorAll("[data-c]").forEach(row => row.classList.remove("bad", "soft"));
+  form.querySelectorAll(".secbadge").forEach(b => b.innerHTML = "");
+}
+function evaluate() {
+  renderYaml();
+  if (!policy) { toast("The policy is still loading. Try again in a moment."); return; }
+  try {
+    const res = policy.evaluate(JSON.parse(JSON.stringify(toManifest())));
+    lastReport = res[0] && res[0].result;
+    document.querySelector(".verdict").classList.remove("is-stale");
+    renderReport(lastReport);
+    TABS.forEach(([t2, p2]) => { $(t2).setAttribute("aria-selected", t2 === "tabF"); $(p2).hidden = t2 !== "tabF"; });
+    $("status").textContent = "Checked at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    $("status").classList.remove("err");
+  } catch (err) {
+    $("status").textContent = "Policy error: " + (err.message || err); $("status").classList.add("err");
+  }
+}
+function runAndShow() { evaluate(); if (matchMedia("(max-width: 960px)").matches) $("gate").scrollIntoView({ behavior: "smooth" }); }
+const ORDER = { deny: 0, warn: 1, waived: 2 };
+function renderReport(r) {
+  const failWarn = $("failWarn").checked;
+  const fail = r.counts.deny > 0 || (failWarn && r.counts.warn > 0);
+  $("band").className = "band " + (fail ? "fail" : "pass");
+  $("state").textContent = fail ? "GATE FAILS" : "GATE PASSES";
+  $("sys").textContent = `${r.system} · risk ${r.risk_tier}`;
+  $("nDeny").textContent = r.counts.deny; $("nWarn").textContent = r.counts.warn; $("nWaived").textContent = r.counts.waived;
+  $("mSt").textContent = fail ? "Fails" : "Passes"; $("mSt").className = "st " + (fail ? "fail" : "pass");
+  $("mCounts").textContent = `${r.counts.deny} failures · ${r.counts.warn} warnings`;
+
+  const fs = [...r.findings].sort((a, b) => ORDER[a.effective] - ORDER[b.effective] || a.id.localeCompare(b.id));
+  $("paneF").innerHTML = fs.length ? fs.map((f, i) => `<div class="finding"><span class="pill ${f.effective}">${f.effective === "deny" ? "FAIL" : f.effective === "warn" ? "WARN" : "WAIVED"}</span><div class="msg">${esc(f.msg)}</div><div class="meta"><span>${f.id}</span><span>§ ${esc(f.clause)}</span><button type="button" class="fix" data-fi="${i}">${f.effective === "deny" ? "Fix this" : "Show field"}</button></div></div>`).join("")
+                                   : `<div class="allclear">No findings. This manifest meets every control.</div>`;
+  $("paneF").querySelectorAll(".fix").forEach(b => b.onclick = () => jumpTo(fs[+b.dataset.fi]));
+
+  // per-field and per-section markers
+  const byId = {};
+  for (const f of r.findings) { if (f.evidence_for) { const k = "EV:" + f.evidence_for; if (!byId[k] || ORDER[f.effective] < ORDER[byId[k]]) byId[k] = f.effective; continue; } const cur = byId[f.id]; if (!cur || ORDER[f.effective] < ORDER[cur]) byId[f.id] = f.effective; }
+  form.querySelectorAll("[data-c]").forEach(row => {
+    const lv = row.dataset.c.split(" ").map(c => byId[c]).filter(Boolean).sort((a, b) => ORDER[a] - ORDER[b])[0];
+    row.classList.toggle("bad", lv === "deny"); row.classList.toggle("soft", lv === "warn");
+  });
+  form.querySelectorAll(".secbadge").forEach(b => {
+    const sec = SECTIONS.find(s => s.id === b.dataset.sec);
+    const inSec = f => f.evidence_for ? EV_SECTION[f.evidence_for] === sec : sec.domains.includes(f.domain);
+    const d = r.findings.filter(f => inSec(f) && f.effective === "deny").length;
+    const w = r.findings.filter(f => inSec(f) && f.effective === "warn").length;
+    b.innerHTML = d ? `<span class="pill deny">${d} fail</span>` : w ? `<span class="pill warn">${w} warn</span>` : `<span class="pill" style="background:var(--pass-soft);color:var(--pass)">clear</span>`;
+  });
+}
+function jumpTo(f) {
+  let row = f.evidence_for ? form.querySelector(`[data-row="spec.evidence.${f.evidence_for}"]`)
+                          : [...form.querySelectorAll("[data-c]")].find(r => r.dataset.c.split(" ").includes(f.id));
+  if (!row) { const sec = SECTIONS.find(s => s.domains.includes(f.domain)); row = sec && $("sec_" + sec.id); }
+  if (!row) return;
+  row.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash");
+  const focusable = row.querySelector("select, input, button.y, button.tag"); if (focusable) setTimeout(() => focusable.focus({ preventScroll: true }), 350);
+}
+$("failWarn").addEventListener("change", () => lastReport && renderReport(lastReport));
+
+/* ---------- tabs, templates, import, copy ---------- */
+const TABS = [["tabF", "paneF"], ["tabY", "paneY"], ["tabR", "paneR"]];
+TABS.forEach(([t]) => $(t).addEventListener("click", () => TABS.forEach(([t2, p2]) => { $(t2).setAttribute("aria-selected", t2 === t); $(p2).hidden = t2 !== t; })));
+
+function loadYaml(text) {
+  const m = jsyaml.load(text, { schema: jsyaml.CORE_SCHEMA });
+  if (!m || typeof m !== "object") throw new Error("That text is not a YAML mapping.");
+  if (m.kind && m.kind !== "AISystem") throw new Error(`Expected kind: AISystem, found kind: ${m.kind}.`);
+  fromManifest(m); renderForm(); renderYaml(); showNotRun(); saveDraft();
+}
+const BLANK = `apiVersion: ai-security.example/v1\nkind: AISystem\nmetadata:\n  name: my-ai-system\n  risk_tier: high\nspec:\n  type: generative\n`;
+$("tpl").addEventListener("change", e => {
+  const k = e.target.value; if (!k) return;
+  if (k !== "blank" && !EXAMPLES[k]) { toast("Example is still loading. Try again in a moment."); e.target.value = ""; return; }
+  loadYaml(k === "blank" ? BLANK : EXAMPLES[k]); scrollTo(0, 0);
+  toast(k === "blank" ? "Started a blank manifest" : "Loaded example");
+  e.target.value = "";
+});
+$("importBtn").onclick = () => { $("impErr").textContent = ""; $("modal").hidden = false; $("impText").focus(); };
+$("impCancel").onclick = () => { $("modal").hidden = true; };
+$("modal").addEventListener("click", e => { if (e.target === $("modal")) $("modal").hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("modal").hidden = true; });
+$("impFile").onchange = e => { const f = e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { $("impText").value = rd.result; }; rd.readAsText(f); };
+$("impGo").onclick = () => {
+  try { loadYaml($("impText").value); $("modal").hidden = true; toast("Imported manifest"); }
+  catch (err) { $("impErr").textContent = "Could not import: " + (err.message || err); }
+};
+$("copyYaml").onclick = () => {
+  const text = $("yaml").textContent;
+  try {
+    navigator.clipboard.writeText(text).then(() => toast("Copied YAML"), () => selectYaml());
+  } catch (_) { selectYaml(); }
+};
+function selectYaml() { const r = document.createRange(); r.selectNodeContents($("yaml")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast("Selected. Press Ctrl/⌘+C to copy"); }
+// File downloads only work when this page is opened directly (e.g. GitHub Pages), not inside a sandboxed frame.
+if (window.self === window.top) {
+  $("dlYaml").hidden = false;
+  $("dlYaml").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([$("yaml").textContent], { type: "text/yaml" })); a.download = (S["metadata.name"] || "ai-system") + ".yaml"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+}
+$("mGo").onclick = runAndShow;
+$("runBtn").onclick = evaluate;
+$("runBtn2").onclick = runAndShow;
+let toastT = 0;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200); }
+
+function saveDraft() { try { localStorage.setItem("iso27090-builder-draft", JSON.stringify(S)); } catch (_) {} }
+function loadDraft() { try { const d = localStorage.getItem("iso27090-builder-draft"); return d ? JSON.parse(d) : null; } catch (_) { return null; } }
+
+/* ---------- boot ---------- */
+(async function boot() {
+  await Promise.all(Object.entries(EXAMPLE_FILES).map(([k, url]) =>
+    fetch(url).then(r => r.ok ? r.text() : "").then(txt => { if (txt) EXAMPLES[k] = txt; }).catch(() => {})));
+  const draft = loadDraft();
+  if (draft && Object.keys(draft).length) { S = draft; renderForm(); renderYaml(); showNotRun(); } else { loadYaml(EXAMPLES.shadow || BLANK); }
+  $("runBtn").disabled = true; $("runBtn2").disabled = true;
+  try { await loadEngine(); $("runBtn").disabled = false; $("runBtn2").disabled = false; }
+  catch (err) { $("state").textContent = "Policy failed to load"; $("status").textContent = String(err.message || err); $("status").classList.add("err"); }
+})();
+</script>
+</body>
+</html>

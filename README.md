@@ -2,6 +2,7 @@
 
 [![policy](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/policy.yml/badge.svg)](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/policy.yml)
 [![self-service](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/action-test.yml/badge.svg)](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/action-test.yml)
+[![manifest-builder](https://github.com/teddy0-0y/iso27090-pac/actions/workflows/pages.yml/badge.svg)](https://teddy0-0y.github.io/iso27090-pac/)
 
 Turn the AI-specific security guidance of **ISO/IEC 27090:2026** (*Cybersecurity —
 Artificial intelligence — Addressing security threats and compromises to AI systems*)
@@ -27,6 +28,26 @@ FAIL - [AIS-AGT-01] Agent identity is 'inherit_user'; it must use a dedicated id
 ...
 52 tests, 0 passed, 6 warnings, 46 failures, 0 exceptions
 ```
+
+## Try it in the browser
+
+**[Open the manifest builder →](https://teddy0-0y.github.io/iso27090-pac/)**
+
+A form for teams who would rather not write YAML by hand. Every field the policy
+reads is a dropdown, toggle or text box, and sections appear only when they
+apply: LLM checks for generative systems, agent checks once tools are enabled,
+an evidence link once a control is marked as done. Press **Run check** to see
+the gate result, then copy or download the manifest for your repo.
+
+- **Same rules as CI.** `make web` compiles `policy/` to WebAssembly and the page
+  evaluates it in the browser, so its results match Conftest. Nothing is uploaded.
+- **Findings point to the fix.** Each failure jumps to the field that caused it.
+- **Start anywhere.** Load one of the example manifests, start blank, or import
+  your own YAML to edit it.
+
+The page is rebuilt and deployed to GitHub Pages on every push to `main` that
+touches the policy ([`pages.yml`](.github/workflows/pages.yml)). Preview it
+locally with `make serve`.
 
 ## Use it in your repo (self-service)
 
@@ -105,7 +126,7 @@ change.
 
 | Domain | Controls | Examples |
 |---|---|---|
-| Governance | GOV-00…05 | AI inventory, risk assessment, threat model and red-team recency |
+| Governance | GOV-00…06 | AI inventory, risk assessment, threat model and red-team recency, evidence links |
 | Supply chain | SC-01…07 | Signed/pinned models, no pickle-based weights, weight scanning, trojan testing |
 | Data | DATA-01…10 | Provenance, integrity hashes, PII minimization + DP/de-identification, RAG authz |
 | Inference | INF-01…06 | AuthN, per-user throttling, confidence-score exposure, sponge-DoS budgets |
@@ -193,7 +214,8 @@ bin/iso27090-gate        # shared runner for the Action, the hook and the CLI
 action.yml               # reusable GitHub Action
 .pre-commit-hooks.yaml   # published pre-commit hooks
 docs/controls.md         # control catalog and clause mapping
-.github/workflows/       # lint → 143 tests (≥90% coverage) → gate examples → gate real plans
+web/index.html           # manifest builder, deployed to GitHub Pages
+.github/workflows/       # lint → 143 tests (≥90% coverage) → gate examples → gate real plans; Pages deploy
 ```
 
 ## Usage
@@ -211,6 +233,7 @@ make demo-aws    # see a failing Terraform plan
 make report FILE=examples/compliant/fraud-scoring.yaml        # JSON summary
 make report-aws FILE=examples/terraform/noncompliant/plan.json
 make plan EX=compliant   # real offline plan (needs terraform)
+make serve               # build the manifest builder and open it at http://localhost:8000
 ```
 
 Gate your own repo:
@@ -223,7 +246,8 @@ conftest test -p path/to/policy --namespace aws plan.json --output junit > resul
 
 ## Writing a manifest
 
-Start from [`examples/compliant/support-copilot.yaml`](examples/compliant/support-copilot.yaml)
+The easiest way is the [manifest builder](https://teddy0-0y.github.io/iso27090-pac/).
+To write one by hand, start from [`examples/compliant/support-copilot.yaml`](examples/compliant/support-copilot.yaml)
 (every field is exercised there). Top-level shape:
 
 ```yaml
@@ -239,15 +263,43 @@ spec:
   llm:          { prompt_injection: {...}, output: {...}, untrusted_content_sources }
   agent:        { enabled, credentials, tools: [{name, action, scopes, requires_human_approval}] }
   operations:   { logging, monitoring, environment, human_oversight, guardrails }
+  evidence:     { <control ID>: <https link>, ... }
 ```
+
+### Evidence for attested controls
+
+A manifest is self-reported, so `risk_assessment.completed: true` is only a
+claim. For controls that produce something a reviewer can open, **AIS-GOV-06**
+asks for an http(s) link under `spec.evidence`, keyed by control ID:
+
+```yaml
+spec:
+  evidence:
+    AIS-GOV-02: https://grc.example.com/assessments/AI-0042          # risk assessment
+    AIS-GOV-03: https://wiki.example.com/threat-models/support-copilot
+    AIS-SC-05:  https://ci.example.com/model-scans/run-4471          # weight scan report
+```
+
+| Needs evidence when claimed | |
+|---|---|
+| AIS-GOV-02, GOV-03, GOV-04 | Risk assessment, threat model, red-team exercise |
+| AIS-SC-04, SC-05, SC-07 | Model provenance, weight scan, behavioural validation |
+| AIS-LLM-06 | Adversarial prompt tests (generative systems) |
+
+A missing or non-link value fails high-risk systems and warns for the rest.
+A claim of `false` needs no evidence, because the control itself already fails.
+GOV-06 is an assurance control added by this project: it supports the
+standard's AI governance programme (5.2) and documentation practice (5.4),
+which do not themselves require evidence links.
 
 ## Limitations
 
 A manifest is a *declaration*. These policies verify that the right controls
-are claimed and consistently configured, not that they work. Pair the gate with
-evidence collection (e.g. checking the declared checksum against the artifact
-in the registry) and with the red-team and threat-model activities the standard
-recommends. The Terraform module closes part of that gap for AWS by checking
+are claimed and consistently configured, not that they work. AIS-GOV-06 makes
+key claims point at evidence, but the gate checks that a link exists, not what
+it contains. Pair it with evidence review (e.g. checking the declared checksum
+against the artifact in the registry) and with the red-team and threat-model
+activities the standard recommends. The Terraform module closes part of that gap for AWS by checking
 what will really be deployed, but it still cannot see controls that live in
 application code (e.g. a guardrail passed on each `InvokeModel` call) or in
 other accounts (org trails, SCPs).

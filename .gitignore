@@ -10,3 +10,4 @@ aws-results.xml
 **/providers.tf
 **/tfplan
 **/plan.real.json
+_site/

@@ -15,6 +15,15 @@ good := {
 	},
 	"spec": {
 		"type": "generative",
+		"evidence": {
+			"AIS-GOV-02": "https://grc.example.com/assessments/AI-0001",
+			"AIS-GOV-03": "https://wiki.example.com/threat-models/fixture",
+			"AIS-GOV-04": "https://jira.example.com/browse/RT-12",
+			"AIS-SC-04": "https://wiki.example.com/models/fixture/provenance",
+			"AIS-SC-05": "https://ci.example.com/scans/model-1234",
+			"AIS-SC-07": "https://ci.example.com/evals/behaviour-88",
+			"AIS-LLM-06": "https://ci.example.com/evals/prompt-attacks-21",
+		},
 		"governance": {
 			"risk_assessment": {"completed": true},
 			"threat_model": {"completed": true, "last_reviewed": "2026-08-01"},

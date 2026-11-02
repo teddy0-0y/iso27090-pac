@@ -20,6 +20,11 @@ standard for the authoritative guidance.
 | AIS-GOV-03 | 5.6 | warn/high | Threat model exists; reviewed ≤ 365 days (staleness = warn) | Surfaces AI-specific attack paths |
 | AIS-GOV-04 | 5.7 | warn/high | Red team exercise ≤ 365 days | Adversary emulation |
 | AIS-GOV-05 | 5.2 | warn | Exceptions are well-formed and unexpired | Risk-acceptance hygiene |
+| AIS-GOV-06 | 5.2, 5.4 | warn/high | Attested controls (GOV-02/03/04, SC-04/05/07, LLM-06) link to evidence under `spec.evidence.<control ID>` as an http(s) URL | Self-attestation without proof |
+
+AIS-GOV-06 is an assurance control added by this project to reduce the risk of
+self-attestation. It supports the AI governance programme (5.2) and documentation
+as an engineering practice (5.4); the standard does not itself require evidence links.
 
 ## Supply chain and model integrity (5.5, 6.7, 6.11.4, B.4)
 

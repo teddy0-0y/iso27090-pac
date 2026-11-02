@@ -39,6 +39,63 @@ test_gov04_red_team_stale if "AIS-GOV-04" in denied(set("/spec/governance/red_te
 test_gov04_unparsable_date_is_stale if "AIS-GOV-04" in denied(set("/spec/governance/red_team/last_exercise", "last spring"))
 
 # ---------------------------------------------------------------------------
+# Evidence for attested controls (AIS-GOV-06)
+# ---------------------------------------------------------------------------
+
+evidence_findings(inp) := {f.evidence_for |
+	some f in results(inp)
+	f.id == "AIS-GOV-06"
+}
+
+test_gov06_missing_evidence_denied_for_high if {
+	inp := drop("/spec/evidence/AIS-GOV-02")
+	"AIS-GOV-06" in denied(inp)
+	evidence_findings(inp) == {"AIS-GOV-02"}
+}
+
+test_gov06_missing_evidence_only_warns_for_medium if {
+	inp := json.patch(good, [
+		{"op": "replace", "path": "/metadata/risk_tier", "value": "medium"},
+		{"op": "remove", "path": "/spec/evidence/AIS-SC-05"},
+	])
+	"AIS-GOV-06" in warned(inp)
+	not "AIS-GOV-06" in denied(inp)
+}
+
+test_gov06_non_link_evidence_denied if {
+	inp := set("/spec/evidence/AIS-LLM-06", "see Confluence")
+	"AIS-GOV-06" in denied(inp)
+	evidence_findings(inp) == {"AIS-LLM-06"}
+}
+
+test_gov06_no_evidence_needed_when_not_claimed if {
+	inp := json.patch(good, [
+		{"op": "replace", "path": "/spec/governance/risk_assessment/completed", "value": false},
+		{"op": "remove", "path": "/spec/evidence/AIS-GOV-02"},
+	])
+	"AIS-GOV-02" in denied(inp)
+	not "AIS-GOV-02" in evidence_findings(inp)
+}
+
+test_gov06_red_team_date_needs_evidence if {
+	inp := drop("/spec/evidence/AIS-GOV-04")
+	evidence_findings(inp) == {"AIS-GOV-04"}
+}
+
+test_gov06_no_evidence_section_flags_every_claim if {
+	inp := drop("/spec/evidence")
+	count(evidence_findings(inp)) == 7
+}
+
+test_gov06_predictive_system_skips_llm_evidence if {
+	inp := json.patch(good, [
+		{"op": "replace", "path": "/spec/type", "value": "predictive"},
+		{"op": "remove", "path": "/spec/evidence/AIS-LLM-06"},
+	])
+	not "AIS-LLM-06" in evidence_findings(inp)
+}
+
+# ---------------------------------------------------------------------------
 # Risk tier behaviour
 # ---------------------------------------------------------------------------
 

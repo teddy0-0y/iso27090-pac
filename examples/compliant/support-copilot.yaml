@@ -9,6 +9,16 @@ metadata:
 spec:
   type: generative
 
+  # Links a reviewer can open to verify each attested control (AIS-GOV-06)
+  evidence:
+    AIS-GOV-02: https://grc.example.com/assessments/AI-0042
+    AIS-GOV-03: https://wiki.example.com/security/threat-models/support-copilot
+    AIS-GOV-04: https://jira.example.com/browse/REDTEAM-31
+    AIS-SC-04: https://wiki.example.com/ml/models/open-llm-8b-instruct/provenance
+    AIS-SC-05: https://ci.example.com/model-scans/open-llm-8b-instruct/run-4471
+    AIS-SC-07: https://ci.example.com/evals/support-copilot/behaviour/run-912
+    AIS-LLM-06: https://ci.example.com/evals/support-copilot/prompt-attacks/run-58
+
   governance:
     risk_assessment:
       completed: true

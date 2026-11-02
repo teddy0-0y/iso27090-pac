@@ -11,7 +11,7 @@ Two modules, one policy engine (**OPA/Rego** via **Conftest**):
 
 1. **AI system manifests** — teams describe each AI system in a short YAML
    manifest (model source, training data, RAG, endpoint exposure, agent tools,
-   logging…), checked against **50 controls**.
+   logging…), checked against **51 controls**.
 2. **AWS Terraform plans** — the actual infrastructure (`terraform show -json`)
    for SageMaker, Bedrock, CloudTrail and IAM, checked against **21 controls**
    before anything is applied.
@@ -193,7 +193,7 @@ bin/iso27090-gate        # shared runner for the Action, the hook and the CLI
 action.yml               # reusable GitHub Action
 .pre-commit-hooks.yaml   # published pre-commit hooks
 docs/controls.md         # control catalog and clause mapping
-.github/workflows/       # lint → 136 tests (≥90% coverage) → gate examples → gate real plans
+.github/workflows/       # lint → 143 tests (≥90% coverage) → gate examples → gate real plans
 ```
 
 ## Usage
@@ -203,7 +203,7 @@ Requires [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa) ≥ 1.0
 
 ```bash
 make lint        # opa fmt + opa check --strict
-make test        # 136 unit tests, fails under 90% coverage
+make test        # 143 unit tests, fails under 90% coverage
 make check       # compliant manifests must pass
 make check-aws   # compliant Terraform plan must pass
 make demo        # see a failing manifest
